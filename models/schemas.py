@@ -99,8 +99,8 @@ class OnboardingSession(BaseModel):
 # ---------------------------------------------------------------------------
 
 class StartOnboardingRequest(BaseModel):
-    user_id: str
-    name:    Optional[str] = None
+    # user_id is NOT here — it comes from the Firebase auth token
+    name: Optional[str] = None   # override display name (optional; defaults to Google account name)
 
 
 class StartOnboardingResponse(BaseModel):
@@ -117,3 +117,11 @@ class SendMessageResponse(BaseModel):
     message:     str
     is_complete: bool
     profile:     Optional[UserProfile] = None   # populated only when is_complete=True
+
+
+class AuthenticatedUser(BaseModel):
+    """Decoded Firebase ID token payload — returned by get_current_user dependency."""
+    uid:     str
+    email:   Optional[str] = None
+    name:    Optional[str] = None
+    picture: Optional[str] = None

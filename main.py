@@ -1,14 +1,18 @@
 """
 UCKhabar — FastAPI Application Entry Point
 
-Exposes:
+Auth-protected endpoints (require Firebase Google Sign-In token):
   POST  /onboarding/start             — begin AI onboarding chat
   POST  /onboarding/message           — continue onboarding chat
-  GET   /feed/{user_id}               — get pre-built curated feed
-  POST  /feed/refresh/{user_id}       — manually trigger feed refresh (test)
-  POST  /admin/rss/poll               — manually trigger RSS poll (test)
-  POST  /admin/scoring/run            — manually trigger scoring job (test)
-  GET   /health                       — health check + scheduler status
+  GET   /feed/me                      — get my curated feed
+  POST  /feed/refresh                 — manually refresh my feed (test)
+
+Public endpoints:
+  GET   /health                       — health check
+
+Admin/test endpoints (no auth — restrict these in production):
+  POST  /admin/rss/poll               — manually trigger RSS poll
+  POST  /admin/scoring/run            — manually trigger scoring for all users
 
 Background jobs (APScheduler):
   Every 30 min  → rss_polling_job()
@@ -22,7 +26,7 @@ from datetime import datetime
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 from agents.onboarding_agent import OnboardingAgent
 from agents.scoring_agent import ScoringAgent
@@ -34,6 +38,7 @@ from models.schemas import (
     StartOnboardingResponse,
     UserFeed,
 )
+from services.auth_service import get_current_user
 from services.db_service import DatabaseService
 from services.rss_service import fetch_all_feeds
 
@@ -48,21 +53,18 @@ logging.basicConfig(
 logger = logging.getLogger("uckhabar.main")
 
 # ---------------------------------------------------------------------------
-# Service singletons (initialised once, shared across all requests)
+# Service singletons
 # ---------------------------------------------------------------------------
 
 onboarding_agent = OnboardingAgent(
     api_key=settings.GEMINI_API_KEY,
     model_name=settings.GEMINI_MODEL,
 )
-
 scoring_agent = ScoringAgent(
     api_key=settings.GEMINI_API_KEY,
     model_name=settings.GEMINI_MODEL,
 )
-
 db = DatabaseService(project_id=settings.GCP_PROJECT_ID)
-
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 # ---------------------------------------------------------------------------
@@ -70,11 +72,7 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 # ---------------------------------------------------------------------------
 
 async def rss_polling_job() -> None:
-    """
-    Runs every 30 minutes.
-    Fetches all 5 RSS sources and stores new articles in Firestore.
-    No Gemini calls — completely free.
-    """
+    """Every 30 min — fetch all RSS feeds, store new articles. No Gemini calls."""
     logger.info("[Scheduler] RSS polling job started")
     try:
         articles = await fetch_all_feeds()
@@ -85,20 +83,12 @@ async def rss_polling_job() -> None:
 
 
 async def scoring_job() -> None:
-    """
-    Runs every 2 hours.
-    Scores recent articles against every user's interest profile using Gemini,
-    then writes each user's pre-built feed to Firestore.
-    """
+    """Every 2 hours — score articles against all user profiles, update feeds."""
     logger.info("[Scheduler] Scoring job started")
     try:
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
         profiles = await db.get_all_user_profiles()
-
-        logger.info(
-            f"[Scheduler] Scoring {len(articles)} articles "
-            f"for {len(profiles)} users"
-        )
+        logger.info(f"[Scheduler] Scoring {len(articles)} articles for {len(profiles)} users")
 
         for profile in profiles:
             scored = scoring_agent.score_articles(
@@ -107,7 +97,6 @@ async def scoring_job() -> None:
                 max_per_batch=settings.MAX_ARTICLES_PER_GEMINI_CALL,
             )
             top = scored[: settings.MAX_ARTICLES_PER_FEED]
-
             feed = UserFeed(
                 user_id=profile.user_id,
                 articles=top,
@@ -116,7 +105,7 @@ async def scoring_job() -> None:
             )
             await db.save_user_feed(feed)
 
-        logger.info(f"[Scheduler] Scoring job done — {len(profiles)} feeds updated")
+        logger.info(f"[Scheduler] Scoring done — {len(profiles)} feeds updated")
     except Exception as exc:
         logger.error(f"[Scheduler] Scoring job failed: {exc}")
 
@@ -127,36 +116,27 @@ async def scoring_job() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Register schedulers and run an initial RSS poll on startup."""
     logger.info("UCKhabar backend starting…")
 
-    scheduler.add_job(
-        rss_polling_job,
-        "interval",
-        minutes=settings.RSS_POLL_INTERVAL_MINUTES,
-        id="rss_poll",
-        max_instances=1,   # prevent overlap if a job runs long
-    )
-    scheduler.add_job(
-        scoring_job,
-        "interval",
-        minutes=settings.SCORING_INTERVAL_MINUTES,
-        id="scoring",
-        max_instances=1,
-    )
+    scheduler.add_job(rss_polling_job, "interval",
+                      minutes=settings.RSS_POLL_INTERVAL_MINUTES,
+                      id="rss_poll", max_instances=1)
+    scheduler.add_job(scoring_job, "interval",
+                      minutes=settings.SCORING_INTERVAL_MINUTES,
+                      id="scoring", max_instances=1)
     scheduler.start()
 
-    # Warm up: fetch RSS immediately on startup so the article pool isn't empty
+    # Warm up article pool immediately on startup
     asyncio.create_task(rss_polling_job())
 
     logger.info(
-        f"Scheduler started. RSS every {settings.RSS_POLL_INTERVAL_MINUTES} min, "
+        f"Scheduler live. RSS every {settings.RSS_POLL_INTERVAL_MINUTES} min, "
         f"scoring every {settings.SCORING_INTERVAL_MINUTES} min."
     )
     yield
 
     scheduler.shutdown(wait=False)
-    logger.info("UCKhabar backend shut down cleanly.")
+    logger.info("UCKhabar backend shut down.")
 
 
 # ---------------------------------------------------------------------------
@@ -165,15 +145,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="UCKhabar API",
-    description="Uncluttered Khabar — AI-powered personal news curation backend",
+    description="Uncluttered Khabar — AI-powered personal news curation",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-
-# -----------------------------------------------------------------------
-# Onboarding endpoints
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Onboarding  (auth required)
+# ---------------------------------------------------------------------------
 
 @app.post(
     "/onboarding/start",
@@ -181,19 +160,26 @@ app = FastAPI(
     summary="Start AI onboarding chat",
     tags=["Onboarding"],
 )
-async def start_onboarding(request: StartOnboardingRequest):
+async def start_onboarding(
+    request: StartOnboardingRequest,
+    user=Depends(get_current_user),   # ← Firebase token verified here
+):
     """
-    Kick off a new onboarding session for a first-time user.
-    Returns a `session_id` and the first AI greeting message.
+    Kick off the onboarding conversation for a first-time user.
+    The user's Google account UID and display name are taken from the auth token.
+    Returns a session_id and the first AI greeting.
     """
+    # Name priority: request override → Google account name → fallback
+    display_name = request.name or user.get("name") or "there"
+
     try:
         session_id, first_message = onboarding_agent.start_session(
-            user_id=request.user_id,
-            name=request.name,
+            user_id=user["uid"],       # Firebase UID is the user_id
+            name=display_name,
         )
         return StartOnboardingResponse(session_id=session_id, message=first_message)
     except Exception as exc:
-        logger.error(f"start_onboarding error: {exc}")
+        logger.error(f"start_onboarding error for {user['uid']}: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -203,11 +189,13 @@ async def start_onboarding(request: StartOnboardingRequest):
     summary="Continue onboarding chat",
     tags=["Onboarding"],
 )
-async def send_onboarding_message(request: SendMessageRequest):
+async def send_onboarding_message(
+    request: SendMessageRequest,
+    user=Depends(get_current_user),
+):
     """
-    Forward the user's reply to Gemini and get the next AI message.
-    When `is_complete=True` the user's interest profile has been built
-    and saved to Firestore — no further calls needed.
+    Forward the user's reply to the Gemini agent.
+    When is_complete=True, the interest profile has been built and saved to Firestore.
     """
     try:
         ai_response, is_complete, profile = onboarding_agent.send_message(
@@ -216,9 +204,14 @@ async def send_onboarding_message(request: SendMessageRequest):
         )
 
         if is_complete and profile:
+            # Safety check: ensure the session belongs to the authenticated user
+            session = onboarding_agent.get_session(request.session_id)
+            if session and session.user_id != user["uid"]:
+                raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+
             await db.save_user_profile(profile)
             logger.info(
-                f"Onboarding complete for user {profile.user_id}. "
+                f"Onboarding complete for {user['uid']} ({user.get('email')}). "
                 f"Topics: {[t.topic for t in profile.topics]}"
             )
 
@@ -234,48 +227,49 @@ async def send_onboarding_message(request: SendMessageRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-# -----------------------------------------------------------------------
-# Feed endpoints
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Feed  (auth required)
+# ---------------------------------------------------------------------------
 
 @app.get(
-    "/feed/{user_id}",
+    "/feed/me",
     response_model=UserFeed,
-    summary="Get curated feed for a user",
+    summary="Get my curated feed",
     tags=["Feed"],
 )
-async def get_user_feed(user_id: str):
+async def get_my_feed(user=Depends(get_current_user)):
     """
-    Return the pre-built, personalised news feed for a user.
-    The feed is refreshed every 2 hours by the scoring scheduler.
+    Return the authenticated user's pre-built personalised news feed.
+    Refreshed every 2 hours by the scoring scheduler.
     """
-    feed = await db.get_user_feed(user_id)
+    feed = await db.get_user_feed(user["uid"])
     if not feed:
         raise HTTPException(
             status_code=404,
             detail=(
-                "Feed not found. Either the user hasn't completed onboarding "
-                "or the first scoring cycle hasn't run yet."
+                "Your feed isn't ready yet. "
+                "Complete onboarding first, then wait a moment for the first scoring cycle."
             ),
         )
     return feed
 
 
 @app.post(
-    "/feed/refresh/{user_id}",
-    summary="Manually refresh a user's feed (testing)",
+    "/feed/refresh",
+    summary="Manually refresh my feed (testing)",
     tags=["Feed"],
 )
-async def refresh_user_feed(user_id: str, background_tasks: BackgroundTasks):
-    """
-    Trigger an on-demand feed refresh for one user.
-    Useful for testing without waiting for the 2-hour scheduler.
-    """
-    profile = await db.get_user_profile(user_id)
+async def refresh_my_feed(
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+):
+    """On-demand feed refresh for the authenticated user. Useful during testing."""
+    uid = user["uid"]
+    profile = await db.get_user_profile(uid)
     if not profile:
         raise HTTPException(
             status_code=404,
-            detail=f"No profile found for user '{user_id}'. Complete onboarding first.",
+            detail="No profile found. Complete onboarding first.",
         )
 
     async def _do_refresh():
@@ -283,57 +277,47 @@ async def refresh_user_feed(user_id: str, background_tasks: BackgroundTasks):
         scored = scoring_agent.score_articles(profile, articles)
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
         feed = UserFeed(
-            user_id=user_id,
+            user_id=uid,
             articles=top,
             generated_at=datetime.utcnow(),
             article_count=len(top),
         )
         await db.save_user_feed(feed)
-        logger.info(f"Manual feed refresh done for {user_id}: {len(top)} articles")
+        logger.info(f"Manual feed refresh done for {uid}: {len(top)} articles")
 
     background_tasks.add_task(_do_refresh)
-    return {"message": "Feed refresh triggered", "user_id": user_id}
+    return {"message": "Feed refresh triggered", "user_id": uid}
 
 
-# -----------------------------------------------------------------------
-# Admin / testing endpoints
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Admin / testing  (no auth — restrict in production via Cloud Run IAM)
+# ---------------------------------------------------------------------------
 
-@app.post(
-    "/admin/rss/poll",
-    summary="Manually trigger RSS poll (testing)",
-    tags=["Admin"],
-)
+@app.post("/admin/rss/poll", summary="Trigger RSS poll (admin)", tags=["Admin"])
 async def manual_rss_poll(background_tasks: BackgroundTasks):
-    """Trigger an immediate RSS poll. Useful during development."""
     background_tasks.add_task(rss_polling_job)
-    return {"message": "RSS polling triggered in background"}
+    return {"message": "RSS polling triggered"}
 
 
-@app.post(
-    "/admin/scoring/run",
-    summary="Manually trigger full scoring job (testing)",
-    tags=["Admin"],
-)
+@app.post("/admin/scoring/run", summary="Trigger scoring job (admin)", tags=["Admin"])
 async def manual_scoring_run(background_tasks: BackgroundTasks):
-    """Trigger an immediate scoring run for all users. Useful during development."""
     background_tasks.add_task(scoring_job)
-    return {"message": "Scoring job triggered in background"}
+    return {"message": "Scoring job triggered"}
 
 
-# -----------------------------------------------------------------------
-# Health check
-# -----------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Health check  (public)
+# ---------------------------------------------------------------------------
 
 @app.get("/health", summary="Health check", tags=["System"])
 async def health_check():
     return {
-        "status":           "healthy",
-        "service":          "UCKhabar API",
-        "version":          "1.0.0",
-        "environment":      settings.APP_ENV,
+        "status":            "healthy",
+        "service":           "UCKhabar API",
+        "version":           "1.0.0",
+        "environment":       settings.APP_ENV,
         "scheduler_running": scheduler.running,
-        "gemini_model":     settings.GEMINI_MODEL,
+        "gemini_model":      settings.GEMINI_MODEL,
     }
 
 
