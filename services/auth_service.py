@@ -38,14 +38,23 @@ def _init_firebase() -> None:
     - On Cloud Run: uses the VM's default service account (no config needed).
     - Locally: reads GOOGLE_APPLICATION_CREDENTIALS env var pointing to a
                service account JSON file.
+    We explicitly pass the project ID so the SDK doesn't have to auto-discover
+    it (auto-discovery can fail on some Cloud Run configurations).
     """
     if firebase_admin._apps:
         return   # already initialised
 
+    import os
+    project_id = os.environ.get("GCP_PROJECT_ID")
+
     try:
         cred = credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred)
-        logger.info("Firebase Admin SDK initialised (Application Default Credentials)")
+        options = {"projectId": project_id} if project_id else {}
+        firebase_admin.initialize_app(cred, options)
+        logger.info(
+            f"Firebase Admin SDK initialised "
+            f"(project={project_id or 'auto-detected'})"
+        )
     except Exception as e:
         logger.error(f"Firebase Admin SDK init failed: {e}")
         raise RuntimeError(
