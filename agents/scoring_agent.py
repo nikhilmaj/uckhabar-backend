@@ -152,9 +152,10 @@ class ScoringAgent:
         # Remove stop words to avoid matching everything
         keywords -= COMMON_STOP_WORDS
 
-        # Bypass keyword prefilter for the MVP to allow semantic matching
-        # since the article pool is small enough.
-        return articles
+        if len(keywords) <= 3:
+            # Profile is very broad — let Gemini decide everything
+            logger.debug("Profile has <= 3 keywords; skipping pre-filter.")
+            return articles
 
         filtered: List[Article] = []
         for article in articles:
