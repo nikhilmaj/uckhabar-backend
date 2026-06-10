@@ -13,16 +13,16 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Gemini
     # ------------------------------------------------------------------
-    GEMINI_API_KEY: str = Field(..., description="Google AI API key for Gemini")
     GEMINI_MODEL:   str = Field(
-        default="gemini-2.5-flash-preview-05-20",
+        default="gemini-2.5-flash",
         description="Gemini model identifier"
     )
 
     # ------------------------------------------------------------------
     # Google Cloud
     # ------------------------------------------------------------------
-    GCP_PROJECT_ID: str = Field(..., description="GCP project ID for Firestore")
+    GCP_PROJECT_ID: str = Field(..., description="GCP project ID")
+    GCP_REGION:     str = Field(default="asia-south1", description="GCP region for Vertex AI")
 
     # ------------------------------------------------------------------
     # App

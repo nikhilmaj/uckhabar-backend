@@ -58,11 +58,13 @@ logger = logging.getLogger("uckhabar.main")
 # ---------------------------------------------------------------------------
 
 onboarding_agent = OnboardingAgent(
-    api_key=settings.GEMINI_API_KEY,
+    project_id=settings.GCP_PROJECT_ID,
+    location=settings.GCP_REGION,
     model_name=settings.GEMINI_MODEL,
 )
 scoring_agent = ScoringAgent(
-    api_key=settings.GEMINI_API_KEY,
+    project_id=settings.GCP_PROJECT_ID,
+    location=settings.GCP_REGION,
     model_name=settings.GEMINI_MODEL,
 )
 db = DatabaseService(project_id=settings.GCP_PROJECT_ID)

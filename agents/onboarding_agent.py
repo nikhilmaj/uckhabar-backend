@@ -18,7 +18,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Tuple, Optional
 
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 from models.schemas import (
     OnboardingSession, UserProfile, TopicFilter, SentimentPreference
@@ -90,17 +91,17 @@ class OnboardingAgent:
       - a live Gemini ChatSession (stateful conversation history)
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash-preview-05-20"):
-        genai.configure(api_key=api_key)
+    def __init__(self, project_id: str, location: str, model_name: str = "gemini-2.5-flash"):
+        vertexai.init(project=project_id, location=location)
 
         # Chat model — carries system prompt and conversation history
-        self._chat_model = genai.GenerativeModel(
+        self._chat_model = GenerativeModel(
             model_name=model_name,
             system_instruction=ONBOARDING_SYSTEM_PROMPT,
         )
 
         # Extraction model — single-shot, no system prompt needed
-        self._extraction_model = genai.GenerativeModel(model_name=model_name)
+        self._extraction_model = GenerativeModel(model_name=model_name)
 
         # session_id → (OnboardingSession, genai.ChatSession)
         self._sessions: Dict[str, Tuple[OnboardingSession, object]] = {}
@@ -197,7 +198,7 @@ class OnboardingAgent:
 
         response = self._extraction_model.generate_content(
             prompt,
-            generation_config=genai.GenerationConfig(
+            generation_config=GenerationConfig(
                 response_mime_type="application/json",
             ),
         )

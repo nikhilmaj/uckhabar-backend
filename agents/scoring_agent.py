@@ -14,7 +14,8 @@ import json
 import logging
 from typing import List, Dict, Optional
 
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 from models.schemas import Article, ScoredArticle, UserProfile
 
@@ -101,9 +102,9 @@ class ScoringAgent:
         top_feed = scored[:15]   # keep top N
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.5-flash-preview-05-20"):
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(
+    def __init__(self, project_id: str, location: str, model_name: str = "gemini-2.5-flash"):
+        vertexai.init(project=project_id, location=location)
+        self._model = GenerativeModel(
             model_name=model_name,
             system_instruction=SCORING_SYSTEM_PROMPT,
         )
@@ -223,7 +224,7 @@ class ScoringAgent:
         try:
             response = self._model.generate_content(
                 prompt,
-                generation_config=genai.GenerationConfig(
+                generation_config=GenerationConfig(
                     response_mime_type="application/json",
                 ),
             )
