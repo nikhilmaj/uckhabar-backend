@@ -28,22 +28,34 @@ logger = logging.getLogger("uckhabar.scoring")
 SCORING_SYSTEM_PROMPT = (
     "You are a precision news relevance engine for UCKhabar. "
     "Score articles strictly against the user's interest profile. "
-    "Be conservative — most articles should score below 6. "
+    "If the profile is broad, allow major headlines to pass. "
     "Always return valid JSON."
 )
 
 def _build_scoring_prompt(profile: UserProfile, articles: List[Article]) -> str:
-    profile_payload = {
-        "topics": [
-            {
-                "topic": t.topic,
-                "must_include_angles": t.include,
-                "must_exclude_angles": t.exclude,
-                "sentiment_preference": t.sentiment.value,
-            }
-            for t in profile.topics
-        ]
-    }
+    if not profile.topics:
+        profile_payload = {
+            "topics": [
+                {
+                    "topic": "General News, Top Stories, World Events",
+                    "must_include_angles": [],
+                    "must_exclude_angles": [],
+                    "sentiment_preference": "any",
+                }
+            ]
+        }
+    else:
+        profile_payload = {
+            "topics": [
+                {
+                    "topic": t.topic,
+                    "must_include_angles": t.include,
+                    "must_exclude_angles": t.exclude,
+                    "sentiment_preference": t.sentiment.value,
+                }
+                for t in profile.topics
+            ]
+        }
 
     articles_payload = [
         {
@@ -228,7 +240,10 @@ class ScoringAgent:
                     response_mime_type="application/json",
                 ),
             )
-            scores_data = json.loads(response.text)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("\n", 1)[-1].rsplit("\n", 1)[0]
+            scores_data = json.loads(raw_text)
         except (json.JSONDecodeError, Exception) as e:
             # Graceful degradation — skip this batch rather than crashing
             logger.warning(f"Scoring batch failed for user {profile.user_id}: {e}")
