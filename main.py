@@ -27,6 +27,7 @@ from datetime import datetime
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from agents.onboarding_agent import OnboardingAgent
 from agents.scoring_agent import ScoringAgent
@@ -148,6 +149,16 @@ app = FastAPI(
     description="Uncluttered Khabar — AI-powered personal news curation",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# CORS — allows the frontend (Firebase Hosting / any domain) to call this API.
+# In production you can restrict allow_origins to your exact domain.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # ---------------------------------------------------------------------------
