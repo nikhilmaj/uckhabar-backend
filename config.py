@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Gemini
     # ------------------------------------------------------------------
     GEMINI_MODEL:   str = Field(
-        default="gemini-1.5-flash",
+        default="gemini-2.5-flash",
         description="Gemini model identifier"
     )
 
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Google Cloud
     # ------------------------------------------------------------------
     GCP_PROJECT_ID: str = Field(..., description="GCP project ID")
-    GCP_REGION:     str = Field(default="asia-south1", description="GCP region for Vertex AI")
+    GCP_REGION:     str = Field(default="us-central1", description="GCP region for Vertex AI")
 
     # ------------------------------------------------------------------
     # App
