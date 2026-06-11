@@ -286,6 +286,10 @@ async def refresh_my_feed(
         )
 
     async def _do_refresh():
+        # Because Cloud Run sleeps between requests, the background RSS poll might not finish.
+        # Force a fetch right now so we definitely have fresh articles to score.
+        await rss_polling_job()
+
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
         scored = scoring_agent.score_articles(profile, articles)
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
