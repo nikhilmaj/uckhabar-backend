@@ -128,6 +128,8 @@ class OnboardingSession(BaseModel):
 class StartOnboardingRequest(BaseModel):
     # user_id is NOT here — it comes from the Firebase auth token
     name: Optional[str] = None   # display name override (optional)
+    selected_categories: Optional[List[str]] = None
+    selected_subcategories: Optional[Dict[str, List[str]]] = None
 
 
 class StartOnboardingResponse(BaseModel):

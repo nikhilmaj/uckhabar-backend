@@ -228,6 +228,8 @@ async def start_onboarding(
         session_id, first_message = onboarding_agent.start_session(
             user_id=user["uid"],       # Firebase UID is the user_id
             name=display_name,
+            categories=request.selected_categories,
+            subcategories=request.selected_subcategories,
         )
         return StartOnboardingResponse(session_id=session_id, message=first_message)
     except Exception as exc:

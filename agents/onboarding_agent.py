@@ -31,23 +31,19 @@ logger = logging.getLogger("uckhabar.onboarding")
 # Prompts
 # ---------------------------------------------------------------------------
 
-ONBOARDING_SYSTEM_PROMPT = """You are the onboarding assistant for UCKhabar — a clean, distraction-free personal news app.
+ONBOARDING_SYSTEM_PROMPT = """You are the onboarding assistant for UCKhabar.
 
-Your sole job: hold a warm, natural conversation to understand exactly what news the user wants to read every day.
+The user has already selected their main categories and subcategories using checkboxes. The system will provide these to you in its first hidden message.
+Your job is to hold a warm, natural conversation to understand if there is anything ELSE specific they want to include or avoid (e.g. "I love AI, but no crypto", or "Only Indian test cricket").
 
 RULES:
-1. Be concise. This runs on mobile — 2 to 4 lines per response maximum.
-2. Sound human, not like a form. No bullet lists. No numbered questions.
-3. Ask about their main interests first, then naturally dig into specifics:
-   - "What angle of [topic] interests you most?"
-   - "Anything about [topic] you'd rather skip?"
-4. Cover at least 2 to 3 distinct topic areas before wrapping up.
-5. After 4 to 6 exchanges, summarise what you've heard clearly in plain English and ask: "Does this sound right?"
-6. When the user confirms (yes / correct / looks good / perfect / etc.), end your reply with this EXACT marker on its own line:
+1. Be concise. 1 to 2 lines per response maximum.
+2. Sound human, not like a form. No bullet lists.
+3. Acknowledge what they've already selected briefly, then ask if they have any specific nuances, angles, or topics they want to add or exclude.
+4. Keep the chat short (max 2 exchanges).
+5. When the user says they have nothing else to add, or when the chat is done, end your reply with this EXACT marker on its own line:
    [PROFILE_COMPLETE]
 
-Do NOT ask about news sources — that is handled separately.
-Do NOT use bullet points or lists in your responses.
 Keep it conversational and warm throughout."""
 
 
@@ -110,7 +106,13 @@ class OnboardingAgent:
     # Public API
     # -----------------------------------------------------------------------
 
-    def start_session(self, user_id: str, name: Optional[str] = None) -> Tuple[str, str]:
+    def start_session(
+        self, 
+        user_id: str, 
+        name: Optional[str] = None,
+        categories: Optional[list] = None,
+        subcategories: Optional[dict] = None
+    ) -> Tuple[str, str]:
         """
         Start a new onboarding session.
         Returns (session_id, first_ai_message).
@@ -119,7 +121,13 @@ class OnboardingAgent:
         chat = self._chat_model.start_chat(history=[])
 
         # Seed the conversation with user context (not shown to the user)
-        seed = f"The user's name is {name}. Begin the onboarding." if name else "Begin the onboarding."
+        seed = f"The user's name is {name}. " if name else "The user is setting up their feed. "
+        if categories:
+            seed += f"They have ALREADY selected these main categories: {', '.join(categories)}. "
+            if subcategories:
+                seed += f"Specific subcategories selected: {json.dumps(subcategories)}. "
+        seed += "Greet the user warmly, acknowledge their selections if any, and ask if there's anything specific they want to add or avoid."
+        
         response = chat.send_message(seed)
         first_message = response.text.replace("[PROFILE_COMPLETE]", "").strip()
 
