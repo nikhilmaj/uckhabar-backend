@@ -16,8 +16,8 @@ Sources chosen to cover:
 import asyncio
 import hashlib
 import logging
-from datetime import datetime
-from email.utils import parsedate
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import List, Optional
 
 import feedparser
@@ -55,13 +55,13 @@ def _article_id(url: str) -> str:
 
 
 def _parse_rfc2822(date_str: Optional[str]) -> Optional[datetime]:
-    """Parse an RFC 2822 date string (standard RSS format) into a datetime."""
+    """Parse an RFC 2822 date string into a naive UTC datetime."""
     if not date_str:
         return None
     try:
-        parsed = parsedate(date_str)
-        if parsed:
-            return datetime(*parsed[:6])
+        dt = parsedate_to_datetime(date_str)
+        # Convert to UTC and strip tzinfo so it is naive, matching the rest of the app
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
     except Exception:
         pass
     return None
@@ -110,6 +110,12 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
                 entry.get("summary") or entry.get("description") or ""
             ).strip()[:MAX_DESCRIPTION]
 
+            published_at = _parse_rfc2822(entry.get("published"))
+
+            # Skip articles older than 7 days (or missing dates)
+            if not published_at or (datetime.utcnow() - published_at).days > 7:
+                continue
+
             articles.append(Article(
                 id=_article_id(url),
                 title=title,
@@ -117,7 +123,7 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
                 url=url,
                 source=source_name,
                 category=_extract_category(entry),
-                published_at=_parse_rfc2822(entry.get("published")),
+                published_at=published_at,
                 fetched_at=datetime.utcnow(),
             ))
 
