@@ -137,6 +137,7 @@ async def scoring_job() -> None:
             top = scored[: settings.MAX_ARTICLES_PER_FEED]
             feed = UserFeed(
                 user_id=profile.user_id,
+                user_name=profile.name,
                 articles=top,
                 generated_at=datetime.utcnow(),
                 article_count=len(top),
@@ -338,6 +339,7 @@ async def refresh_my_feed(
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
         feed = UserFeed(
             user_id=uid,
+            user_name=profile.name,
             articles=top,
             generated_at=datetime.utcnow(),
             article_count=len(top),
@@ -412,6 +414,7 @@ async def complete_onboarding(
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
         feed = UserFeed(
             user_id=uid,
+            user_name=profile.name,
             articles=top,
             generated_at=datetime.utcnow(),
             article_count=len(top),

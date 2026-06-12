@@ -101,6 +101,7 @@ class ScoredArticle(BaseModel):
 class UserFeed(BaseModel):
     """Pre-built, ready-to-serve feed for one user."""
     user_id:       str
+    user_name:     Optional[str] = None
     articles:      List[ScoredArticle] = Field(default_factory=list)
     generated_at:  datetime = Field(default_factory=datetime.utcnow)
     article_count: int = 0
