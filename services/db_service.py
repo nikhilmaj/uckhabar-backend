@@ -40,10 +40,16 @@ class DatabaseService:
     async def save_articles(self, articles: List[Article]) -> int:
         """
         Batch-upsert articles into Firestore.
-        Uses merge=True so re-fetched articles don't overwrite existing records.
+        Uses merge=True so re-fetched articles don't overwrite existing records,
+        EXCEPT for fetched_at which is always refreshed so recency queries work.
         Returns the number of articles written.
 
         Firestore batches are capped at 500 ops — we chunk automatically.
+
+        IMPORTANT: fetched_at must be stored as a native datetime (not an ISO
+        string) so that Firestore range queries (>= cutoff datetime) work correctly.
+        model_dump(mode="json") would produce an ISO string — we handle this by
+        building the dict manually and keeping fetched_at as a real datetime object.
         """
         if not articles:
             return 0
@@ -57,7 +63,13 @@ class DatabaseService:
 
             for article in chunk:
                 ref = self._db.collection("articles").document(article.id)
-                batch.set(ref, article.model_dump(mode="json"), merge=True)
+                # Serialize to dict, then restore fetched_at as a real datetime
+                # so Firestore stores it as a Timestamp (not a string).
+                data = article.model_dump(mode="json")
+                data["fetched_at"] = datetime.utcnow()   # always refresh; keeps recency window accurate
+                if article.published_at is not None:
+                    data["published_at"] = article.published_at   # keep as datetime too
+                batch.set(ref, data, merge=True)
                 total += 1
 
             await batch.commit()
@@ -69,6 +81,9 @@ class DatabaseService:
         """
         Return all articles fetched within the last `hours` hours.
         This is the pool handed to the scoring agent.
+
+        Note: fetched_at is stored as a native Firestore Timestamp (datetime),
+        so the >= comparison with a Python datetime works correctly.
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours)
 
@@ -81,7 +96,9 @@ class DatabaseService:
         articles: List[Article] = []
         async for doc in docs:
             try:
-                articles.append(Article(**doc.to_dict()))
+                d = doc.to_dict()
+                # Firestore returns Timestamps as datetime objects; Pydantic handles them fine.
+                articles.append(Article(**d))
             except Exception as e:
                 logger.debug(f"[DB] Skipping malformed article doc {doc.id}: {e}")
 
