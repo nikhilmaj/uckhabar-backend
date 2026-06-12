@@ -134,27 +134,36 @@ class ScoringAgent:
         Eliminates obviously irrelevant articles without any API call.
         Articles that pass are sent to Gemini for precise scoring.
 
-        Logic:
-          - Build a keyword set from all topic names and include-angles.
-          - Any article whose title/description/category contains at least one
-            keyword is kept.
-          - If the profile has very few keywords (<= 3), we skip filtering
-            entirely to avoid over-restricting broad profiles.
+        For V2 profiles (schema_version >= 2, has selected_categories):
+          - Uses the rich taxonomy keywords for each selected category + subcategory.
+          - This is more accurate and drastically reduces Gemini token usage.
+
+        For V1 profiles (legacy AI-only onboarding):
+          - Falls back to the original approach: build keywords from topic names.
+
+        In both cases, if fewer than 4 unique keywords are found, we skip
+        filtering to avoid over-restricting very broad profiles.
         """
-        keywords: set[str] = set()
-        for topic in profile.topics:
-            for word in topic.topic.lower().split():
-                keywords.add(word)
-            for angle in topic.include:
-                for word in angle.lower().split():
+        # V2: use taxonomy keywords
+        if getattr(profile, "schema_version", 1) >= 2 and profile.selected_categories:
+            from services.topic_taxonomy import get_keywords_for_profile
+            keywords = set(get_keywords_for_profile(
+                profile.selected_categories,
+                profile.selected_subcategories or {},
+            ))
+        else:
+            # V1 fallback: extract keywords from free-form topic names
+            keywords: set = set()
+            for topic in profile.topics:
+                for word in topic.topic.lower().split():
                     keywords.add(word)
+                for angle in topic.include:
+                    for word in angle.lower().split():
+                        keywords.add(word)
+            keywords -= COMMON_STOP_WORDS
 
-        # Remove stop words to avoid matching everything
-        keywords -= COMMON_STOP_WORDS
-
-        if len(keywords) <= 3:
-            # Profile is very broad — let Gemini decide everything
-            logger.debug("Profile has <= 3 keywords; skipping pre-filter.")
+        if len(keywords) < 4:
+            logger.debug("Too few keywords for pre-filter; sending all articles to Gemini.")
             return articles
 
         filtered: List[Article] = []
@@ -163,13 +172,14 @@ class ScoringAgent:
                 article.title,
                 article.description or "",
                 article.category or "",
+                article.source or "",
             ]).lower()
 
             if any(kw in searchable for kw in keywords):
                 filtered.append(article)
 
         logger.debug(
-            f"Keyword pre-filter: {len(articles)} → {len(filtered)} articles "
+            f"Keyword pre-filter: {len(articles)} \u2192 {len(filtered)} articles "
             f"(removed {len(articles) - len(filtered)})"
         )
         return filtered

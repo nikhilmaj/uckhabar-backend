@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     MAX_ARTICLES_PER_FEED:        int = Field(default=15,  description="Max headlines per user feed")
     RSS_POLL_INTERVAL_MINUTES:    int = Field(default=30,  description="How often to fetch RSS feeds")
-    SCORING_INTERVAL_MINUTES:     int = Field(default=120, description="How often to run Gemini scoring (2 hrs)")
+    SCORING_INTERVAL_MINUTES:     int = Field(default=240, description="How often to run Gemini scoring (4 hrs)")
     ARTICLE_RETENTION_HOURS:      int = Field(default=24,  description="How old articles can be before scoring ignores them")
     MAX_ARTICLES_PER_GEMINI_CALL: int = Field(default=40,  description="Batch size sent to Gemini per call")
 

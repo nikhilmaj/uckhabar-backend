@@ -1,6 +1,15 @@
 """
 UCKhabar — Core data models (Pydantic v2)
 All the shared types used across agents, services, and API layer.
+
+Schema versioning:
+  v1 — AI-only onboarding (free-form topics list, no selected_categories)
+  v2 — Structured onboarding (selected_categories + subcategories + topics built from taxonomy)
+
+The `topics` field is ALWAYS the canonical source for scoring. All other
+fields (selected_categories, selected_subcategories) are UI helpers.
+This ensures backward compatibility: old v1 profiles continue to score
+correctly even after the v2 migration.
 """
 
 from pydantic import BaseModel, Field
@@ -35,14 +44,31 @@ class TopicFilter(BaseModel):
 
 
 class UserProfile(BaseModel):
-    """Structured interest profile built during onboarding."""
-    user_id:           str
-    name:              Optional[str] = None
-    topics:            List[TopicFilter]
-    preferred_sources: List[str] = Field(default_factory=list)
-    language:          str = "en"
-    created_at:        Optional[datetime] = None
-    updated_at:        Optional[datetime] = None
+    """Structured interest profile built during onboarding.
+
+    schema_version:
+        1 = legacy AI-only onboarding (only `topics` populated)
+        2 = structured onboarding (selected_categories + topics populated)
+
+    Scoring always reads from `topics` — never from selected_categories directly.
+    This ensures old v1 profiles continue to work without any migration.
+    """
+    schema_version:          int  = Field(default=1, description="Profile schema version")
+    user_id:                 str
+    name:                    Optional[str] = None
+    # Canonical scoring field — always present
+    topics:                  List[TopicFilter] = Field(default_factory=list)
+    # V2 UI fields — populated only for schema_version >= 2
+    selected_categories:     List[str] = Field(default_factory=list)
+    selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
+    ai_extras:               Optional[str] = None
+    # Metadata
+    preferred_sources:       List[str] = Field(default_factory=list)
+    language:                str = "en"
+    created_at:              Optional[datetime] = None
+    updated_at:              Optional[datetime] = None
+    last_seen:               Optional[datetime] = None
+    scoring_paused:          bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +93,7 @@ class ScoredArticle(BaseModel):
     title:            str
     url:              str
     source:           str
-    relevance_score:  float   # 0–10; only articles >= 6 are kept in feeds
+    relevance_score:  float   # 0-10; only articles >= 6 are kept in feeds
     reason:           Optional[str] = None   # one-line explanation from Gemini
     published_at:     Optional[datetime] = None
 
@@ -81,7 +107,7 @@ class UserFeed(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Onboarding session
+# Onboarding session (AI chat state, stored in-memory)
 # ---------------------------------------------------------------------------
 
 class OnboardingSession(BaseModel):
@@ -100,7 +126,7 @@ class OnboardingSession(BaseModel):
 
 class StartOnboardingRequest(BaseModel):
     # user_id is NOT here — it comes from the Firebase auth token
-    name: Optional[str] = None   # override display name (optional; defaults to Google account name)
+    name: Optional[str] = None   # display name override (optional)
 
 
 class StartOnboardingResponse(BaseModel):
@@ -117,6 +143,23 @@ class SendMessageResponse(BaseModel):
     message:     str
     is_complete: bool
     profile:     Optional[UserProfile] = None   # populated only when is_complete=True
+
+
+class CompleteOnboardingRequest(BaseModel):
+    """
+    Structured onboarding payload sent after the checkbox + AI chat flow.
+    The backend converts this into a full UserProfile with topics built from
+    the taxonomy keywords for each selected category/subcategory.
+    """
+    name:                    Optional[str] = None
+    selected_categories:     List[str]
+    selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
+    ai_extras:               Optional[str] = None   # free-text from Screen 4 AI chat
+
+
+class CompleteOnboardingResponse(BaseModel):
+    status:             str = "processing"
+    estimated_minutes:  int = 4
 
 
 class AuthenticatedUser(BaseModel):

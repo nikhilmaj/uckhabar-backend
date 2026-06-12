@@ -157,3 +157,41 @@ class DatabaseService:
         if doc.exists:
             return UserFeed(**doc.to_dict())
         return None
+
+    # -----------------------------------------------------------------------
+    # User activity / lifecycle management
+    # -----------------------------------------------------------------------
+
+    async def update_last_seen(self, user_id: str) -> None:
+        """
+        Stamp the user's last_seen time and ensure scoring_paused is False.
+        Called on every /feed/me and /profile/me request so the inactivity
+        timer resets whenever a user opens the app.
+        """
+        ref = self._db.collection("user_profiles").document(user_id)
+        doc = await ref.get()
+        if doc.exists:
+            await ref.update({
+                "last_seen": datetime.utcnow(),
+                "scoring_paused": False,
+            })
+
+    async def set_scoring_paused(self, user_id: str, paused: bool) -> None:
+        """Mark a user as scoring-paused (inactive >7 days) or resume them."""
+        ref = self._db.collection("user_profiles").document(user_id)
+        doc = await ref.get()
+        if doc.exists:
+            await ref.update({"scoring_paused": paused})
+            logger.info(f"[DB] scoring_paused={paused} for user {user_id}")
+
+    async def delete_user_data(self, user_id: str) -> None:
+        """
+        Hard-delete a user's profile and feed from Firestore.
+        Called when a user has been inactive for >= 60 days.
+        The user can re-onboard at any time — their auth account is untouched.
+        """
+        profile_ref = self._db.collection("user_profiles").document(user_id)
+        feed_ref    = self._db.collection("user_feeds").document(user_id)
+        await profile_ref.delete()
+        await feed_ref.delete()
+        logger.info(f"[DB] Deleted profile + feed for inactive user {user_id}")

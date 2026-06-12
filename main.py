@@ -22,7 +22,7 @@ Background jobs (APScheduler):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -33,15 +33,19 @@ from agents.onboarding_agent import OnboardingAgent
 from agents.scoring_agent import ScoringAgent
 from config import settings
 from models.schemas import (
+    CompleteOnboardingRequest,
+    CompleteOnboardingResponse,
     SendMessageRequest,
     SendMessageResponse,
     StartOnboardingRequest,
     StartOnboardingResponse,
     UserFeed,
+    UserProfile,
 )
 from services.auth_service import get_current_user
 from services.db_service import DatabaseService
 from services.rss_service import fetch_all_feeds
+from services.topic_taxonomy import build_topics_from_selections, get_keywords_for_profile
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -86,14 +90,45 @@ async def rss_polling_job() -> None:
 
 
 async def scoring_job() -> None:
-    """Every 2 hours — score articles against all user profiles, update feeds."""
+    """Every 4 hours — score articles against all user profiles, update feeds.
+    Also handles inactive user management:
+      - 7+ days no login  → set scoring_paused = True (skip scoring)
+      - 60+ days no login → delete profile and feed from Firestore
+    """
     logger.info("[Scheduler] Scoring job started")
     try:
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
         profiles = await db.get_all_user_profiles()
         logger.info(f"[Scheduler] Scoring {len(articles)} articles for {len(profiles)} users")
 
+        now = datetime.utcnow()
+        skipped = 0
+        deleted = 0
+
         for profile in profiles:
+            # --- Inactive user management ---
+            if profile.last_seen:
+                days_inactive = (now - profile.last_seen).days
+
+                if days_inactive >= 60:
+                    # Hard delete: remove profile and feed
+                    await db.delete_user_data(profile.user_id)
+                    logger.info(f"[Scheduler] Deleted data for inactive user {profile.user_id} ({days_inactive}d)")
+                    deleted += 1
+                    continue
+
+                if days_inactive >= 7 and not profile.scoring_paused:
+                    # Soft pause: mark as paused, skip this cycle
+                    await db.set_scoring_paused(profile.user_id, True)
+                    logger.info(f"[Scheduler] Paused scoring for user {profile.user_id} ({days_inactive}d inactive)")
+                    skipped += 1
+                    continue
+
+            if profile.scoring_paused:
+                skipped += 1
+                continue
+
+            # --- Score articles for active user ---
             scored = scoring_agent.score_articles(
                 profile,
                 articles,
@@ -108,7 +143,10 @@ async def scoring_job() -> None:
             )
             await db.save_user_feed(feed)
 
-        logger.info(f"[Scheduler] Scoring done — {len(profiles)} feeds updated")
+        logger.info(
+            f"[Scheduler] Scoring done — {len(profiles) - skipped - deleted} feeds updated, "
+            f"{skipped} skipped (inactive), {deleted} deleted (60d+)"
+        )
     except Exception as exc:
         logger.error(f"[Scheduler] Scoring job failed: {exc}")
 
@@ -253,9 +291,14 @@ async def send_onboarding_message(
 async def get_my_feed(user=Depends(get_current_user)):
     """
     Return the authenticated user's pre-built personalised news feed.
-    Refreshed every 2 hours by the scoring scheduler.
+    Refreshed every 4 hours by the scoring scheduler.
+    Also updates last_seen so inactive user management works correctly.
     """
-    feed = await db.get_user_feed(user["uid"])
+    uid = user["uid"]
+    # Update last_seen + clear scoring_paused on every active visit
+    await db.update_last_seen(uid)
+
+    feed = await db.get_user_feed(uid)
     if not feed:
         raise HTTPException(
             status_code=404,
@@ -304,6 +347,103 @@ async def refresh_my_feed(
 
     background_tasks.add_task(_do_refresh)
     return {"message": "Feed refresh triggered", "user_id": uid}
+
+
+# ---------------------------------------------------------------------------
+# Onboarding complete  (auth required) — new structured endpoint
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/onboarding/complete",
+    response_model=CompleteOnboardingResponse,
+    summary="Complete structured onboarding with checkbox selections",
+    tags=["Onboarding"],
+)
+async def complete_onboarding(
+    request: CompleteOnboardingRequest,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+):
+    """
+    Accept the structured onboarding result (category checkboxes + optional AI extras).
+    Builds a full UserProfile from the taxonomy, saves to Firestore,
+    and triggers an immediate feed refresh in the background.
+    """
+    uid   = user["uid"]
+    name  = request.name or user.get("name") or "there"
+    now   = datetime.utcnow()
+
+    # Build topics from taxonomy
+    topics = build_topics_from_selections(
+        selected_categories=request.selected_categories,
+        selected_subcategories=request.selected_subcategories,
+        ai_extras=request.ai_extras,
+    )
+
+    # Check if profile already exists (to preserve created_at)
+    existing = await db.get_user_profile(uid)
+    created_at = existing.created_at if existing else now
+
+    profile = UserProfile(
+        schema_version=2,
+        user_id=uid,
+        name=name,
+        topics=topics,
+        selected_categories=request.selected_categories,
+        selected_subcategories=request.selected_subcategories,
+        ai_extras=request.ai_extras,
+        created_at=created_at,
+        updated_at=now,
+        last_seen=now,
+        scoring_paused=False,
+    )
+
+    await db.save_user_profile(profile)
+    logger.info(
+        f"Structured onboarding complete for {uid}: "
+        f"categories={request.selected_categories}"
+    )
+
+    # Trigger immediate feed build in background
+    async def _build_feed():
+        await rss_polling_job()
+        articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
+        scored = scoring_agent.score_articles(profile, articles)
+        top = scored[: settings.MAX_ARTICLES_PER_FEED]
+        feed = UserFeed(
+            user_id=uid,
+            articles=top,
+            generated_at=datetime.utcnow(),
+            article_count=len(top),
+        )
+        await db.save_user_feed(feed)
+        logger.info(f"Initial feed built for {uid}: {len(top)} articles")
+
+    background_tasks.add_task(_build_feed)
+    return CompleteOnboardingResponse(status="processing", estimated_minutes=4)
+
+
+# ---------------------------------------------------------------------------
+# Profile  (auth required)
+# ---------------------------------------------------------------------------
+
+@app.get(
+    "/profile/me",
+    response_model=UserProfile,
+    summary="Get my profile",
+    tags=["Profile"],
+)
+async def get_my_profile(user=Depends(get_current_user)):
+    """
+    Return the authenticated user's interest profile from Firestore.
+    Used by the frontend to pre-populate the preferences flow.
+    """
+    uid = user["uid"]
+    await db.update_last_seen(uid)
+    profile = await db.get_user_profile(uid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
+    return profile
 
 
 # ---------------------------------------------------------------------------
