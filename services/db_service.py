@@ -11,7 +11,7 @@ Collections:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from google.cloud import firestore
@@ -89,8 +89,8 @@ class DatabaseService:
         Note: fetched_at is stored as a native Firestore Timestamp (datetime),
         so the >= comparison with a Python datetime works correctly.
         """
-        cutoff_fetched   = datetime.utcnow() - timedelta(hours=hours)
-        cutoff_published = datetime.utcnow() - timedelta(days=7)
+        cutoff_fetched   = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff_published = datetime.now(timezone.utc) - timedelta(days=7)
 
         docs = (
             self._db.collection("articles")
@@ -102,11 +102,12 @@ class DatabaseService:
         async for doc in docs:
             try:
                 d = doc.to_dict()
-                # Secondary guard: skip articles older than 7 days by published_at
                 published_at = d.get("published_at")
-                if published_at and hasattr(published_at, 'replace'):
-                    # It's already a datetime
-                    if published_at.replace(tzinfo=None) < cutoff_published:
+                if published_at and hasattr(published_at, 'utcoffset'):
+                    # Ensure comparison is timezone-aware on both sides
+                    if published_at.utcoffset() is None:
+                        published_at = published_at.replace(tzinfo=timezone.utc)
+                    if published_at < cutoff_published:
                         continue
                 articles.append(Article(**d))
             except Exception as e:

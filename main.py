@@ -22,7 +22,7 @@ Background jobs (APScheduler):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -101,7 +101,7 @@ async def scoring_job() -> None:
         profiles = await db.get_all_user_profiles()
         logger.info(f"[Scheduler] Scoring {len(articles)} articles for {len(profiles)} users")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         skipped = 0
         deleted = 0
 
@@ -139,7 +139,7 @@ async def scoring_job() -> None:
                 user_id=profile.user_id,
                 user_name=profile.name,
                 articles=top,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(timezone.utc),
                 article_count=len(top),
             )
             await db.save_user_feed(feed)
