@@ -79,17 +79,22 @@ class DatabaseService:
 
     async def get_recent_articles(self, hours: int = 24) -> List[Article]:
         """
-        Return all articles fetched within the last `hours` hours.
-        This is the pool handed to the scoring agent.
+        Return all articles fetched within the last `hours` hours AND
+        published within the last 7 days.
+
+        The dual filter ensures:
+        - fetched_at: only articles from this polling window are considered
+        - published_at: stale articles that slipped through ingest are excluded
 
         Note: fetched_at is stored as a native Firestore Timestamp (datetime),
         so the >= comparison with a Python datetime works correctly.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_fetched   = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_published = datetime.utcnow() - timedelta(days=7)
 
         docs = (
             self._db.collection("articles")
-            .where("fetched_at", ">=", cutoff)
+            .where("fetched_at", ">=", cutoff_fetched)
             .stream()
         )
 
@@ -97,12 +102,17 @@ class DatabaseService:
         async for doc in docs:
             try:
                 d = doc.to_dict()
-                # Firestore returns Timestamps as datetime objects; Pydantic handles them fine.
+                # Secondary guard: skip articles older than 7 days by published_at
+                published_at = d.get("published_at")
+                if published_at and hasattr(published_at, 'replace'):
+                    # It's already a datetime
+                    if published_at.replace(tzinfo=None) < cutoff_published:
+                        continue
                 articles.append(Article(**d))
             except Exception as e:
                 logger.debug(f"[DB] Skipping malformed article doc {doc.id}: {e}")
 
-        logger.info(f"[DB] Retrieved {len(articles)} recent articles (last {hours}h)")
+        logger.info(f"[DB] Retrieved {len(articles)} recent articles (last {hours}h, max 7d old)")
         return articles
 
     # -----------------------------------------------------------------------
