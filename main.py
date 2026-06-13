@@ -313,6 +313,43 @@ async def get_my_feed(user=Depends(get_current_user)):
     return feed
 
 
+@app.get(
+    "/feed/discovery",
+    summary="Public discovery feed — top recent articles, no auth required",
+    tags=["Feed"],
+)
+async def get_discovery_feed():
+    """
+    Returns the 20 most recently published articles across all sources.
+    Public endpoint — no authentication required.
+    Used on the waiting screen while a new user's personalised feed is built.
+    """
+    articles = await db.get_recent_articles(hours=48)
+    sorted_articles = sorted(
+        articles,
+        key=lambda a: (
+            a.published_at
+            if a.published_at and a.published_at.tzinfo
+            else datetime.min.replace(tzinfo=timezone.utc)
+        ),
+        reverse=True,
+    )[:20]
+    return {
+        "articles": [
+            {
+                "id":          a.id,
+                "title":       a.title,
+                "url":         a.url,
+                "source":      a.source,
+                "description": (a.description or "")[:200],
+                "published_at": a.published_at.isoformat() if a.published_at else None,
+            }
+            for a in sorted_articles
+        ],
+        "count": len(sorted_articles),
+    }
+
+
 @app.post(
     "/feed/refresh",
     summary="Manually refresh my feed (testing)",
