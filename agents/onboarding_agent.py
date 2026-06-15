@@ -74,6 +74,17 @@ RULES:
 - Return ONLY the JSON object, nothing else"""
 
 
+KEYWORD_EXTRACTION_PROMPT = """You are an expert news librarian. 
+The user has provided a custom, free-form text describing their specific news interests.
+Your job is to extract a list of 1-to-3 word keywords from their text that can be used to filter RSS articles.
+
+USER INTERESTS:
+{text}
+
+Return ONLY a JSON array of strings. No markdown, no explanation.
+Example: ["cricket", "ai startups", "spacex"]"""
+
+
 # ---------------------------------------------------------------------------
 # Agent class
 # ---------------------------------------------------------------------------
@@ -181,6 +192,31 @@ class OnboardingAgent:
             session.profile = profile
 
         return clean_response, is_complete, profile
+
+    def extract_keywords(self, ai_extras_text: str) -> list[str]:
+        """
+        Extract concise keywords from a free-form text of user interests.
+        Used for V2 schemas to bolster the taxonomy-based pre-filter.
+        """
+        prompt = KEYWORD_EXTRACTION_PROMPT.format(text=ai_extras_text)
+        try:
+            response = self._extraction_model.generate_content(
+                prompt,
+                generation_config=GenerationConfig(
+                    response_mime_type="application/json",
+                ),
+            )
+            raw_text = response.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("\n", 1)[-1].rsplit("\n", 1)[0]
+            keywords = json.loads(raw_text)
+            if isinstance(keywords, list):
+                # Ensure they are lowercase strings
+                return [str(k).lower() for k in keywords]
+            return []
+        except Exception as e:
+            logger.warning(f"Keyword extraction failed: {e}")
+            return []
 
     def get_session(self, session_id: str) -> Optional[OnboardingSession]:
         """Return the session metadata (without the live chat object)."""

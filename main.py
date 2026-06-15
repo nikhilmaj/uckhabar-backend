@@ -303,13 +303,19 @@ async def get_my_feed(user=Depends(get_current_user)):
 
     feed = await db.get_user_feed(uid)
     if not feed:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Your feed isn't ready yet. "
-                "Complete onboarding first, then wait a moment for the first scoring cycle."
-            ),
-        )
+        from fastapi.responses import JSONResponse
+        # Check if they have a profile; if so, feed is currently building
+        profile = await db.get_user_profile(uid)
+        if profile:
+            return JSONResponse(status_code=202, content={"detail": "Feed is building"})
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Your feed isn't ready yet. "
+                    "Complete onboarding first, then wait a moment for the first scoring cycle."
+                ),
+            )
     return feed
 
 
@@ -421,6 +427,11 @@ async def complete_onboarding(
         ai_extras=request.ai_extras,
     )
 
+    # Extract AI keywords for filtering if extra interests were provided
+    ai_keywords = []
+    if request.ai_extras and request.ai_extras.strip():
+        ai_keywords = onboarding_agent.extract_keywords(request.ai_extras)
+
     # Check if profile already exists (to preserve created_at)
     existing = await db.get_user_profile(uid)
     created_at = existing.created_at if existing else now
@@ -433,6 +444,7 @@ async def complete_onboarding(
         selected_categories=request.selected_categories,
         selected_subcategories=request.selected_subcategories,
         ai_extras=request.ai_extras,
+        ai_extras_keywords=ai_keywords,
         created_at=created_at,
         updated_at=now,
         last_seen=now,

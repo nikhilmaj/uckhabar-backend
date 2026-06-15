@@ -62,6 +62,7 @@ class UserProfile(BaseModel):
     selected_categories:     List[str] = Field(default_factory=list)
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
     ai_extras:               Optional[str] = None
+    ai_extras_keywords:      List[str] = Field(default_factory=list)
     # Metadata
     preferred_sources:       List[str] = Field(default_factory=list)
     language:                str = "en"

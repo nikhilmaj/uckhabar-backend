@@ -144,13 +144,17 @@ class ScoringAgent:
         In both cases, if fewer than 4 unique keywords are found, we skip
         filtering to avoid over-restricting very broad profiles.
         """
-        # V2: use taxonomy keywords
+        # V2: use taxonomy keywords + AI extracted keywords
         if getattr(profile, "schema_version", 1) >= 2 and profile.selected_categories:
             from services.topic_taxonomy import get_keywords_for_profile
             keywords = set(get_keywords_for_profile(
                 profile.selected_categories,
                 profile.selected_subcategories or {},
             ))
+            # Merge any AI-extracted keywords from ai_extras
+            if getattr(profile, "ai_extras_keywords", None):
+                for kw in profile.ai_extras_keywords:
+                    keywords.add(kw.lower())
         else:
             # V1 fallback: extract keywords from free-form topic names
             keywords: set = set()
