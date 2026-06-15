@@ -12,6 +12,7 @@ Only articles scoring >= 6 / 10 survive into the final feed.
 
 import json
 import logging
+import asyncio
 from typing import List, Dict, Optional
 
 import vertexai
@@ -199,13 +200,8 @@ class ScoringAgent:
         max_per_batch: int = 40,
     ) -> List[ScoredArticle]:
         """
-        Full pipeline: pre-filter → batch Gemini scoring → sorted results.
-
-        `max_per_batch` caps articles per Gemini call to stay within token limits.
-        Large article pools are split into multiple calls automatically.
-
-        Returns articles sorted by relevance_score DESC (highest first).
-        Only articles with score >= 6 are returned.
+        Filter and score articles against a user profile.
+        Returns a sorted list of highly relevant articles.
         """
         if not articles:
             return []
@@ -219,14 +215,18 @@ class ScoringAgent:
         article_map: Dict[str, Article] = {a.id: a for a in candidates}
         all_scored: List[ScoredArticle] = []
 
-        # Stage 2 — batch Gemini scoring
+        # Stage 2 — concurrent batch Gemini scoring
+        tasks = []
         for i in range(0, len(candidates), max_per_batch):
             batch = candidates[i : i + max_per_batch]
             logger.info(
-                f"Scoring batch {i // max_per_batch + 1} "
+                f"Queuing batch {i // max_per_batch + 1} "
                 f"({len(batch)} articles) for user {profile.user_id}"
             )
-            batch_results = self._score_batch(profile, batch, article_map)
+            tasks.append(self._score_batch(profile, batch, article_map))
+        
+        results = await asyncio.gather(*tasks)
+        for batch_results in results:
             all_scored.extend(batch_results)
 
         # Sort by most recent first, then fallback to relevance score if times are identical
@@ -244,7 +244,7 @@ class ScoringAgent:
         )
         return all_scored
 
-    def _score_batch(
+    async def _score_batch(
         self,
         profile: UserProfile,
         articles: List[Article],
@@ -254,7 +254,7 @@ class ScoringAgent:
         prompt = _build_scoring_prompt(profile, articles)
 
         try:
-            response = self._model.generate_content(
+            response = await self._model.generate_content_async(
                 prompt,
                 generation_config=GenerationConfig(
                     response_mime_type="application/json",

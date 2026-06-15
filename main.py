@@ -129,9 +129,9 @@ async def scoring_job() -> None:
                 continue
 
             # --- Score articles for active user ---
-            scored = scoring_agent.score_articles(
-                profile,
-                articles,
+            scored = await scoring_agent.score_articles(
+                profile=profile,
+                articles=articles,
                 max_per_batch=settings.MAX_ARTICLES_PER_GEMINI_CALL,
             )
             top = scored[: settings.MAX_ARTICLES_PER_FEED]
@@ -380,7 +380,7 @@ async def refresh_my_feed(
         await rss_polling_job()
 
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
-        scored = scoring_agent.score_articles(profile, articles)
+        scored = await scoring_agent.score_articles(profile, articles)
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
         feed = UserFeed(
             user_id=uid,
@@ -460,7 +460,7 @@ async def complete_onboarding(
     # Trigger immediate feed build in background
     async def _build_feed():
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
-        scored = scoring_agent.score_articles(profile, articles)
+        scored = await scoring_agent.score_articles(profile, articles)
         top = scored[: settings.MAX_ARTICLES_PER_FEED]
         feed = UserFeed(
             user_id=uid,
