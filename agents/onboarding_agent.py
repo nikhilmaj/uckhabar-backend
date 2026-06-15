@@ -76,7 +76,11 @@ RULES:
 
 KEYWORD_EXTRACTION_PROMPT = """You are an expert news librarian. 
 The user has provided a custom, free-form text describing their specific news interests.
-Your job is to extract a list of 1-to-3 word keywords from their text that can be used to filter RSS articles.
+Your job is to extract a list of 1-to-3 word POSITIVE keywords from their text that can be used to filter RSS articles.
+
+CRITICAL RULES:
+- ONLY extract keywords for topics the user WANTS to read about.
+- Do NOT extract keywords for topics the user wants to AVOID or EXCLUDE (e.g. if they say "no politics", do not extract "politics").
 
 USER INTERESTS:
 {text}
