@@ -225,8 +225,14 @@ class ScoringAgent:
             batch_results = self._score_batch(profile, batch, article_map)
             all_scored.extend(batch_results)
 
-        # Sort highest relevance first
-        all_scored.sort(key=lambda x: x.relevance_score, reverse=True)
+        # Sort by most recent first, then fallback to relevance score if times are identical
+        all_scored.sort(
+            key=lambda x: (
+                x.published_at.timestamp() if x.published_at else 0,
+                x.relevance_score
+            ),
+            reverse=True
+        )
 
         logger.info(
             f"Scoring complete for user {profile.user_id}: "
