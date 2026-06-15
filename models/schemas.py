@@ -131,6 +131,7 @@ class StartOnboardingRequest(BaseModel):
     name: Optional[str] = None   # display name override (optional)
     selected_categories: Optional[List[str]] = None
     selected_subcategories: Optional[Dict[str, List[str]]] = None
+    existing_ai_extras: Optional[str] = None
 
 
 class StartOnboardingResponse(BaseModel):

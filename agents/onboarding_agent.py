@@ -127,7 +127,8 @@ class OnboardingAgent:
         user_id: str, 
         name: Optional[str] = None,
         categories: Optional[list] = None,
-        subcategories: Optional[dict] = None
+        subcategories: Optional[dict] = None,
+        existing_ai_extras: Optional[str] = None
     ) -> Tuple[str, str]:
         """
         Start a new onboarding session.
@@ -142,7 +143,12 @@ class OnboardingAgent:
             seed += f"They have ALREADY selected these main categories: {', '.join(categories)}. "
             if subcategories:
                 seed += f"Specific subcategories selected: {json.dumps(subcategories)}. "
-        seed += "Greet the user warmly, acknowledge their selections if any, and ask if there's anything specific they want to add or avoid."
+        
+        if existing_ai_extras:
+            seed += f"IMPORTANT: The user previously provided these custom instructions: '{existing_ai_extras}'. "
+            seed += "Acknowledge their previous instructions, and ask if they want to keep them, modify them, or add anything else. "
+        else:
+            seed += "Greet the user warmly, acknowledge their selections if any, and ask if there's anything specific they want to add or avoid."
         
         response = chat.send_message(seed)
         first_message = response.text.replace("[PROFILE_COMPLETE]", "").strip()

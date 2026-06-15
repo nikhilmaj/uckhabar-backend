@@ -230,6 +230,7 @@ async def start_onboarding(
             name=display_name,
             categories=request.selected_categories,
             subcategories=request.selected_subcategories,
+            existing_ai_extras=request.existing_ai_extras,
         )
         return StartOnboardingResponse(session_id=session_id, message=first_message)
     except Exception as exc:
