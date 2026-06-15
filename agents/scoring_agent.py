@@ -193,7 +193,7 @@ class ScoringAgent:
     # Stage 2 — Gemini scoring
     # -----------------------------------------------------------------------
 
-    def score_articles(
+    async def score_articles(
         self,
         profile: UserProfile,
         articles: List[Article],
