@@ -447,7 +447,6 @@ async def complete_onboarding(
 
     # Trigger immediate feed build in background
     async def _build_feed():
-        await rss_polling_job()
         articles = await db.get_recent_articles(hours=settings.ARTICLE_RETENTION_HOURS)
         scored = scoring_agent.score_articles(profile, articles)
         top = scored[: settings.MAX_ARTICLES_PER_FEED]

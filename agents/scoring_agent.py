@@ -86,7 +86,7 @@ SCORING RULES:
 
 Return ONLY a JSON array (no markdown, no explanation):
 [
-  {{"article_id": "...", "score": 8.5, "reason": "one short sentence"}},
+  {{"article_id": "...", "score": 8.5}},
   ...
 ]
 
@@ -277,7 +277,6 @@ class ScoringAgent:
                 url=original.url,
                 source=original.source,
                 relevance_score=score,
-                reason=item.get("reason"),
                 published_at=original.published_at,
             ))
 
