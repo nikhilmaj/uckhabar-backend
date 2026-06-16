@@ -82,7 +82,7 @@ SCORING RULES:
 - Penalise heavily if the article matches any "must_exclude_angles".
 - Reward articles that match "must_include_angles" for the relevant topic.
 - Apply sentiment preference if it is not "any".
-- ONLY include articles with score >= 6 in the output.
+- ONLY include articles with score >= 4 in the output.
 - Sort results by score, highest first.
 
 Return ONLY a JSON array (no markdown, no explanation):

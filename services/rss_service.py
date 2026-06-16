@@ -38,6 +38,9 @@ RSS_SOURCES: dict[str, str] = {
     "Telegraph":  "https://www.telegraph.co.uk/rss.xml",
     "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
     "Livemint":   "https://www.livemint.com/rss/news",
+    "TechCrunch": "https://techcrunch.com/feed/",
+    "Economic Times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "VentureBeat": "https://feeds.feedburner.com/venturebeat/SZYF",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source
