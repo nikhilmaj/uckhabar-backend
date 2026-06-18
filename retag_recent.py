@@ -21,7 +21,10 @@ async def main():
     # The user said "gemini hasn't read the existing articles yet... so we need gemini to run through the last 3 days articles"
     # We'll retag all of them.
     
-    tagger = TaggingAgent()
+    tagger = TaggingAgent(
+        project_id=settings.GCP_PROJECT_ID,
+        location=settings.GCP_REGION
+    )
     batch_size = 10
     
     for i in range(0, len(articles_db), batch_size):
