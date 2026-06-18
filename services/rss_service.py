@@ -34,13 +34,14 @@ logger = logging.getLogger("uckhabar.rss")
 RSS_SOURCES: dict[str, str] = {
     "The Hindu":  "https://www.thehindu.com/news/feeder/default.rss",
     "BBC":        "https://feeds.bbci.co.uk/news/rss.xml",
-    "Reuters":    "https://feeds.reuters.com/reuters/topNews",
+    "Reuters":    "https://news.google.com/rss/search?q=site:reuters.com",
     "Telegraph":  "https://www.telegraph.co.uk/rss.xml",
     "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
-    "Livemint":   "https://www.livemint.com/rss/news",
+    "CNBC":       "https://www.cnbc.com/id/100003114/device/rss/rss.html",
     "TechCrunch": "https://techcrunch.com/feed/",
-    "Economic Times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
     "VentureBeat": "https://feeds.feedburner.com/venturebeat/SZYF",
+    "Times of India": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
+    "Variety":    "https://variety.com/feed/",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source

@@ -116,6 +116,35 @@ class DatabaseService:
         logger.info(f"[DB] Retrieved {len(articles)} recent articles (last {hours}h, max 7d old)")
         return articles
 
+    async def delete_old_articles(self, days: int = 7) -> int:
+        """
+        Delete all articles published more than `days` ago.
+        Called by the daily cleanup scheduled job.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        docs = (
+            self._db.collection("articles")
+            .where("published_at", "<", cutoff)
+            .stream()
+        )
+        
+        deleted = 0
+        batch = self._db.batch()
+        
+        async for doc in docs:
+            batch.delete(doc.reference)
+            deleted += 1
+            if deleted % 499 == 0:
+                await batch.commit()
+                batch = self._db.batch()
+                
+        if deleted % 499 != 0:
+            await batch.commit()
+            
+        logger.info(f"[DB] Deleted {deleted} articles older than {days} days")
+        return deleted
+
     # -----------------------------------------------------------------------
     # User profiles
     # -----------------------------------------------------------------------
@@ -195,14 +224,11 @@ class DatabaseService:
             await ref.update({"scoring_paused": paused})
             logger.info(f"[DB] scoring_paused={paused} for user {user_id}")
 
-    async def delete_user_data(self, user_id: str) -> None:
+    async def delete_user_feed_only(self, user_id: str) -> None:
         """
-        Hard-delete a user's profile and feed from Firestore.
-        Called when a user has been inactive for >= 60 days.
-        The user can re-onboard at any time — their auth account is untouched.
+        Hard-delete a user's feed from Firestore, but keep their profile.
+        Called when a user has been inactive for >= 60 days, or when unpausing.
         """
-        profile_ref = self._db.collection("user_profiles").document(user_id)
-        feed_ref    = self._db.collection("user_feeds").document(user_id)
-        await profile_ref.delete()
+        feed_ref = self._db.collection("user_feeds").document(user_id)
         await feed_ref.delete()
-        logger.info(f"[DB] Deleted profile + feed for inactive user {user_id}")
+        logger.info(f"[DB] Deleted feed for user {user_id}")

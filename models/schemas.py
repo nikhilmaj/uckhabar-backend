@@ -53,9 +53,10 @@ class UserProfile(BaseModel):
     Scoring always reads from `topics` — never from selected_categories directly.
     This ensures old v1 profiles continue to work without any migration.
     """
-    schema_version:          int  = Field(default=1, description="Profile schema version")
+    schema_version:          int  = Field(default=2, description="Profile schema version")
     user_id:                 str
     name:                    Optional[str] = None
+    email:                   Optional[str] = None
     # Canonical scoring field — always present
     topics:                  List[TopicFilter] = Field(default_factory=list)
     # V2 UI fields — populated only for schema_version >= 2
@@ -63,12 +64,23 @@ class UserProfile(BaseModel):
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
     ai_extras:               Optional[str] = None
     ai_extras_keywords:      List[str] = Field(default_factory=list)
+    # V2 Content Filters
+    content_filters:         Dict[str, bool] = Field(default_factory=lambda: {
+        "is_hard_news": True,
+        "is_editorial": True,
+        "is_sponsored": True,
+        "is_explicit": True,
+        "is_aggregated": True
+    })
     # Metadata
     preferred_sources:       List[str] = Field(default_factory=list)
     language:                str = "en"
     created_at:              Optional[datetime] = None
     updated_at:              Optional[datetime] = None
     last_seen:               Optional[datetime] = None
+    last_login_ip:           Optional[str] = None
+    last_login_city:         Optional[str] = None
+    last_login_country:      Optional[str] = None
     scoring_paused:          bool = False
 
 
@@ -77,7 +89,7 @@ class UserProfile(BaseModel):
 # ---------------------------------------------------------------------------
 
 class Article(BaseModel):
-    """A raw article fetched from an RSS feed."""
+    """A raw article fetched from an RSS feed, with tags from Gemini."""
     id:           str                        # MD5 hash of URL — stable, dedup-safe
     title:        str
     description:  Optional[str] = None
@@ -86,17 +98,29 @@ class Article(BaseModel):
     category:     Optional[str] = None
     published_at: Optional[datetime] = None
     fetched_at:   datetime = Field(default_factory=datetime.utcnow)
+    
+    # V2 Tagging Fields (populated by tagging agent)
+    categories:    List[str] = Field(default_factory=list)
+    subcategories: List[str] = Field(default_factory=list)
+    content_type:  Dict[str, bool] = Field(default_factory=lambda: {
+        "is_hard_news": True,
+        "is_editorial": False,
+        "is_sponsored": False,
+        "is_explicit": False,
+        "is_aggregated": False
+    })
 
 
 class ScoredArticle(BaseModel):
-    """An article after Gemini has scored it for relevance to a specific user."""
+    """An article after being matched for relevance to a specific user."""
     article_id:       str
     title:            str
     url:              str
     source:           str
     relevance_score:  float   # 0-10; only articles >= 6 are kept in feeds
-    reason:           Optional[str] = None   # one-line explanation from Gemini
     published_at:     Optional[datetime] = None
+    categories:       List[str] = Field(default_factory=list)
+    subcategories:    List[str] = Field(default_factory=list)
 
 
 class UserFeed(BaseModel):
@@ -160,6 +184,13 @@ class CompleteOnboardingRequest(BaseModel):
     selected_categories:     List[str]
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
     ai_extras:               Optional[str] = None   # free-text from Screen 4 AI chat
+    content_filters:         Dict[str, bool] = Field(default_factory=lambda: {
+        "is_hard_news": True,
+        "is_editorial": True,
+        "is_sponsored": True,
+        "is_explicit": True,
+        "is_aggregated": True
+    })
 
 
 class CompleteOnboardingResponse(BaseModel):

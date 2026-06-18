@@ -959,6 +959,41 @@ TAXONOMY: Dict[str, Dict] = {
             ],
         },
     },
+
+    # ─────────────────────────────────────────────────────────────
+    "Video Gaming": {
+        "base_keywords": [
+            "video game", "gaming", "gamer", "videogame", "gamepad",
+        ],
+        "subcategories": {
+            "Rockstar Games": [
+                "rockstar games", "gta", "grand theft auto", "red dead", "red dead redemption",
+                "gta vi", "gta 6", "rockstar title",
+            ],
+            "PlayStation": [
+                "playstation", "ps5", "ps4", "sony interactive", "dual sense", "dualsense",
+            ],
+            "Xbox": [
+                "xbox", "microsoft gaming", "xbox series", "game pass", "xbox one",
+            ],
+            "Nintendo": [
+                "nintendo", "switch", "mario", "zelda", "pokemon", "nintendo direct",
+            ],
+            "PC Gaming": [
+                "pc gaming", "steam", "epic games store", "pc game", "gaming pc",
+            ],
+            "Esports": [
+                "esports", "e-sports", "competitive gaming", "gaming tournament",
+                "league of legends", "dota 2", "cs:go", "csgo", "valorant",
+            ],
+            "Game Releases": [
+                "game release", "new game", "upcoming game", "game review", "early access",
+            ],
+            "Gaming Industry": [
+                "gaming industry", "game studio", "game developer", "gaming revenue",
+            ],
+        },
+    },
 }
 
 

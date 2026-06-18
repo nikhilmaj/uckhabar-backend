@@ -23,7 +23,7 @@ Cloud Run:
 import logging
 import firebase_admin
 from firebase_admin import credentials, auth
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 logger = logging.getLogger("uckhabar.auth")
@@ -74,6 +74,7 @@ _bearer_scheme = HTTPBearer()
 
 
 async def get_current_user(
+    request: Request,
     http_creds: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
 ) -> dict:
     """
@@ -90,8 +91,13 @@ async def get_current_user(
         email   — user's Google email
         name    — user's Google display name
         picture — profile picture URL
+        ip      — client's real IP address
     """
     token = http_creds.credentials
+
+    # Extract client IP (handling Cloud Run proxies)
+    forwarded_for = request.headers.get("x-forwarded-for")
+    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.client.host
 
     try:
         decoded = auth.verify_id_token(token)
@@ -100,6 +106,7 @@ async def get_current_user(
             "email":   decoded.get("email"),
             "name":    decoded.get("name"),
             "picture": decoded.get("picture"),
+            "ip":      client_ip,
         }
     except auth.ExpiredIdTokenError:
         raise HTTPException(
