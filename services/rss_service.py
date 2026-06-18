@@ -116,8 +116,9 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
 
             published_at = _parse_rfc2822(entry.get("published"))
 
-            # Skip articles older than 7 days (or missing dates)
-            if not published_at or (datetime.utcnow() - published_at).days > 7:
+            # Skip articles older than 3 days (or missing dates) to save Gemini tagging costs,
+            # since feed_builder only uses articles from the last 72 hours.
+            if not published_at or (datetime.utcnow() - published_at).days > 3:
                 continue
 
             articles.append(Article(
