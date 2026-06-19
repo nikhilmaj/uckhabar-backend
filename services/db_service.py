@@ -204,9 +204,22 @@ class DatabaseService:
 
     async def update_last_seen(self, user_id: str) -> None:
         """
-        Stamp the user's last_seen time and ensure scoring_paused is False.
-        Called on every /feed/me and /profile/me request so the inactivity
-        timer resets whenever a user opens the app.
+        Stamp the user's last_seen time ONLY.
+        Does NOT touch scoring_paused — call unpause_user() explicitly when
+        you want to resume scoring (e.g. in get_my_feed when a paused user returns).
+        Called on every /feed/me and /profile/me request.
+        """
+        ref = self._db.collection("user_profiles").document(user_id)
+        doc = await ref.get()
+        if doc.exists:
+            await ref.update({"last_seen": datetime.utcnow()})
+
+    async def unpause_user(self, user_id: str) -> None:
+        """
+        Reset scoring_paused to False AND update last_seen.
+        Only called explicitly from get_my_feed when a paused user returns.
+        Keeping this separate from update_last_seen prevents a profile-page
+        visit from silently clearing the paused state without triggering a rebuild.
         """
         ref = self._db.collection("user_profiles").document(user_id)
         doc = await ref.get()
@@ -227,8 +240,11 @@ class DatabaseService:
     async def delete_user_feed_only(self, user_id: str) -> None:
         """
         Hard-delete a user's feed from Firestore, but keep their profile.
-        Called when a user has been inactive for >= 60 days, or when unpausing.
+        Called when returning a paused user (re-trigger build), or when
+        pruning stale feeds for 60-day+ inactive users.
+        The user profile is preserved so historical user records are kept.
         """
         feed_ref = self._db.collection("user_feeds").document(user_id)
         await feed_ref.delete()
-        logger.info(f"[DB] Deleted feed for user {user_id}")
+        logger.info(f"[DB] Deleted feed for user {user_id} (profile kept)")
+

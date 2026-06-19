@@ -2,33 +2,37 @@
 UCKhabar — FastAPI Application Entry Point
 
 Auth-protected endpoints (require Firebase Google Sign-In token):
-  POST  /onboarding/start             — begin AI onboarding chat
-  POST  /onboarding/message           — continue onboarding chat
   GET   /feed/me                      — get my curated feed
-  POST  /feed/refresh                 — manually refresh my feed (test)
+  POST  /feed/refresh                 — manually refresh my feed
+  POST  /onboarding/complete          — complete structured onboarding
+  GET   /profile/me                   — get my profile
 
 Public endpoints:
+  GET   /feed/discovery               — top recent articles (no auth)
   GET   /health                       — health check
 
-Admin/test endpoints (no auth — restrict these in production):
+Admin endpoints (require X-Admin-Secret header):
   POST  /admin/rss/poll               — manually trigger RSS poll
   POST  /admin/scoring/run            — manually trigger scoring for all users
 
 Background jobs (APScheduler):
-  Every 30 min  → rss_polling_job()
-  Every 2 hours → scoring_job()
+  Every 60 min  → rss_polling_job()
+  Every 4 hours → feed_builder_job()
+  Every 24 hours → daily_cleanup_job()
 """
 
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from agents.tagging_agent import TaggingAgent
 from config import settings
@@ -67,15 +71,31 @@ db = DatabaseService(project_id=settings.GCP_PROJECT_ID)
 scheduler = AsyncIOScheduler(timezone="UTC")
 
 # ---------------------------------------------------------------------------
+# Security — Admin dependency
+# ---------------------------------------------------------------------------
+
+async def verify_admin(x_admin_secret: str = Header(None)):
+    """
+    Protect admin endpoints with a shared secret passed via the
+    X-Admin-Secret HTTP header. The secret is set as a Cloud Run
+    environment variable (ADMIN_SECRET). Never expose this in client code.
+    """
+    if not x_admin_secret or not secrets.compare_digest(x_admin_secret, settings.ADMIN_SECRET):
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: valid X-Admin-Secret header required."
+        )
+
+# ---------------------------------------------------------------------------
 # Scheduled jobs
 # ---------------------------------------------------------------------------
 
 async def rss_polling_job() -> None:
-    """Every 30 min — fetch all RSS feeds, tag with Gemini, store new articles."""
+    """Every 60 min — fetch all RSS feeds, tag with Gemini, store new articles."""
     logger.info("[Scheduler] RSS polling & tagging job started")
     try:
         articles = await fetch_all_feeds()
-        # V2: Tag articles at ingestion (Gemini batch call)
+        # V2: Tag articles at ingestion time (Gemini batch call, zero cost per user)
         tagged_articles = await tagging_agent.tag_articles(articles)
         saved = await db.save_articles(tagged_articles)
         logger.info(f"[Scheduler] RSS poll & tag done — {saved} articles stored")
@@ -87,18 +107,18 @@ async def feed_builder_job() -> None:
     """Every 4 hours — match articles against user profiles using plain Python.
     Also handles inactive user management:
       - 7+ days no login  → set scoring_paused = True (skip building)
-      - 60+ days no login → delete profile and feed from Firestore
+      - 60+ days no login → delete feed only (keep profile for historical records)
     """
     logger.info("[Scheduler] Feed builder job started")
     try:
-        # V2: Strict 3-day recency rule per instructions (instead of old 7-day)
+        # V2: Strict 3-day recency rule
         articles = await db.get_recent_articles(hours=72)
         profiles = await db.get_all_user_profiles()
         logger.info(f"[Scheduler] Matching {len(articles)} articles for {len(profiles)} users")
 
         now = datetime.now(timezone.utc)
         skipped = 0
-        deleted = 0
+        pruned = 0
 
         for profile in profiles:
             # --- Inactive user management ---
@@ -106,14 +126,21 @@ async def feed_builder_job() -> None:
                 days_inactive = (now - profile.last_seen.replace(tzinfo=timezone.utc)).days
 
                 if days_inactive >= 60:
-                    await db.delete_user_data(profile.user_id)
-                    logger.info(f"[Scheduler] Deleted data for inactive user {profile.user_id} ({days_inactive}d)")
-                    deleted += 1
+                    # Delete their stale feed to free Firestore space; KEEP the profile
+                    # so we maintain a historical record of all users (active + past).
+                    await db.delete_user_feed_only(profile.user_id)
+                    await db.set_scoring_paused(profile.user_id, True)
+                    logger.info(
+                        f"[Scheduler] Pruned feed for 60d+ inactive user {profile.user_id}"
+                    )
+                    pruned += 1
                     continue
 
                 if days_inactive >= 7 and not profile.scoring_paused:
                     await db.set_scoring_paused(profile.user_id, True)
-                    logger.info(f"[Scheduler] Paused scoring for user {profile.user_id} ({days_inactive}d inactive)")
+                    logger.info(
+                        f"[Scheduler] Paused scoring for user {profile.user_id} ({days_inactive}d inactive)"
+                    )
                     skipped += 1
                     continue
 
@@ -121,10 +148,10 @@ async def feed_builder_job() -> None:
                 skipped += 1
                 continue
 
-            # --- Feed Matching (No AI) ---
+            # --- Feed Matching (No AI — pure Python keyword/category matching) ---
             user_feed = []
             user_cats = set(profile.selected_categories)
-            
+
             # Combine all selected subcategories into a single flat set
             user_subs = set()
             for subs in profile.selected_subcategories.values():
@@ -132,30 +159,27 @@ async def feed_builder_job() -> None:
                     user_subs.add(s)
 
             for a in articles:
-                # 1. Check Content Filters (all filters must pass if user turned them off)
+                # 1. Apply Content Filters
                 cf = profile.content_filters
                 act = a.content_type
-                
-                # If user disabled a filter, and the article IS that type, reject it.
-                if act.get("is_hard_news", False) and not cf.get("is_hard_news", True): continue
-                if act.get("is_editorial", False) and not cf.get("is_editorial", True): continue
-                if act.get("is_sponsored", False) and not cf.get("is_sponsored", True): continue
-                if act.get("is_explicit", False) and not cf.get("is_explicit", True): continue
+
+                # If user disabled a filter and the article IS that type → reject it
+                if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
+                if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
+                if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
+                if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
                 if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
-                
-                # 2. Check Match
+
+                # 2. Category/Subcategory match
                 article_cats = set(a.categories)
                 article_subs = set(a.subcategories)
-                
-                matched = False
-                if user_cats.intersection(article_cats):
-                    matched = True
-                elif user_subs.intersection(article_subs):
-                    matched = True
-                    
+
+                matched = bool(
+                    user_cats.intersection(article_cats) or
+                    user_subs.intersection(article_subs)
+                )
+
                 if matched:
-                    # Assign a dummy relevance score to maintain compatibility,
-                    # but sort primarily by publish date.
                     user_feed.append(ScoredArticle(
                         article_id=a.id,
                         title=a.title,
@@ -166,14 +190,13 @@ async def feed_builder_job() -> None:
                         categories=a.categories,
                         subcategories=a.subcategories,
                     ))
-                    
+
             # Sort chronologically, newest first
             user_feed.sort(
                 key=lambda x: x.published_at.timestamp() if x.published_at else 0,
-                reverse=True
+                reverse=True,
             )
-            
-            # We don't cap the article count anymore per V2 instructions
+
             feed = UserFeed(
                 user_id=profile.user_id,
                 user_name=profile.name,
@@ -184,17 +207,20 @@ async def feed_builder_job() -> None:
             await db.save_user_feed(feed)
 
         logger.info(
-            f"[Scheduler] Feed build done — {len(profiles) - skipped - deleted} feeds updated, "
-            f"{skipped} skipped (inactive), {deleted} deleted (60d+)"
+            f"[Scheduler] Feed build done — "
+            f"{len(profiles) - skipped - pruned} feeds updated, "
+            f"{skipped} skipped (inactive <60d), {pruned} pruned (60d+)"
         )
     except Exception as exc:
         logger.error(f"[Scheduler] Feed building failed: {exc}")
 
+
 async def daily_cleanup_job() -> None:
-    """Deletes articles older than 7 days from Firestore."""
+    """Deletes articles older than 7 days from Firestore to control storage costs."""
     logger.info("[Scheduler] Daily cleanup job started")
     try:
         deleted = await db.delete_old_articles(days=7)
+        logger.info(f"[Scheduler] Daily cleanup done — {deleted} old articles removed")
     except Exception as exc:
         logger.error(f"[Scheduler] Cleanup job failed: {exc}")
 
@@ -238,15 +264,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="UCKhabar API",
     description="Uncluttered Khabar — AI-powered personal news curation",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
+    # Disable automatic /docs and /redoc in production to reduce attack surface
+    docs_url="/docs" if settings.APP_ENV == "development" else None,
+    redoc_url=None,
 )
 
-# CORS — allows the frontend (Firebase Hosting / any domain) to call this API.
-# In production you can restrict allow_origins to your exact domain.
+# CORS — locked to known frontend origins only.
+# Do NOT use allow_origins=["*"] — that lets any website impersonate your users.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -267,30 +296,34 @@ async def get_my_feed(
 ):
     """
     Return the authenticated user's pre-built personalised news feed.
-    Refreshed every 4 hours by the scoring scheduler.
+    Refreshed every 4 hours by the feed builder scheduler.
     Also updates last_seen so inactive user management works correctly.
     """
     uid = user["uid"]
-    
-    # Check if the user was paused before we update last_seen
+
+    # Check if the user was paused BEFORE updating last_seen
     profile = await db.get_user_profile(uid)
     if profile and profile.scoring_paused:
-        # User is returning after being paused (>7 days inactivity)
+        # User is returning after being paused (>7 days inactivity).
+        # Delete the stale/empty feed, explicitly unpause, then trigger a rebuild.
         await db.delete_user_feed_only(uid)
-        await db.update_last_seen(uid)
+        await db.unpause_user(uid)   # sets scoring_paused=False + updates last_seen
         background_tasks.add_task(feed_builder_job)
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=202,
-            content={"detail": "Welcome back! Your feed was paused due to inactivity. Please return in 15-30 minutes while we refill your news feed."}
+            content={
+                "detail": (
+                    "Welcome back! Your feed was paused due to inactivity. "
+                    "Please return in 15–30 minutes while we refill your news feed."
+                )
+            }
         )
 
-    # Normal active path: Update last_seen + clear scoring_paused
+    # Normal active path: update timestamp only (do NOT reset scoring_paused here)
     await db.update_last_seen(uid)
 
     feed = await db.get_user_feed(uid)
     if not feed:
-        from fastapi.responses import JSONResponse
         if profile:
             background_tasks.add_task(feed_builder_job)
             return JSONResponse(status_code=202, content={"detail": "Feed is building"})
@@ -329,11 +362,11 @@ async def get_discovery_feed():
     return {
         "articles": [
             {
-                "id":          a.id,
-                "title":       a.title,
-                "url":         a.url,
-                "source":      a.source,
-                "description": (a.description or "")[:200],
+                "id":           a.id,
+                "title":        a.title,
+                "url":          a.url,
+                "source":       a.source,
+                "description":  (a.description or "")[:200],
                 "published_at": a.published_at.isoformat() if a.published_at else None,
             }
             for a in sorted_articles
@@ -344,14 +377,14 @@ async def get_discovery_feed():
 
 @app.post(
     "/feed/refresh",
-    summary="Manually refresh my feed (testing)",
+    summary="Manually refresh my feed",
     tags=["Feed"],
 )
 async def refresh_my_feed(
     background_tasks: BackgroundTasks,
     user=Depends(get_current_user),
 ):
-    """On-demand feed refresh for the authenticated user. Useful during testing."""
+    """On-demand feed refresh for the authenticated user."""
     uid = user["uid"]
     profile = await db.get_user_profile(uid)
     if not profile:
@@ -365,13 +398,13 @@ async def refresh_my_feed(
 
 
 # ---------------------------------------------------------------------------
-# Onboarding complete  (auth required) — new structured endpoint
+# Onboarding  (auth required)
 # ---------------------------------------------------------------------------
 
 @app.post(
     "/onboarding/complete",
     response_model=CompleteOnboardingResponse,
-    summary="Complete structured onboarding with checkbox selections",
+    summary="Complete structured onboarding",
     tags=["Onboarding"],
 )
 async def complete_onboarding(
@@ -380,9 +413,9 @@ async def complete_onboarding(
     user=Depends(get_current_user),
 ):
     """
-    Accept the structured onboarding result (category checkboxes + optional AI extras).
+    Accept the structured onboarding result (category checkboxes + content filters).
     Builds a full UserProfile from the taxonomy, saves to Firestore,
-    and triggers an immediate feed refresh in the background.
+    and triggers an immediate feed build in the background.
     """
     uid   = user["uid"]
     name  = request.name or user.get("name") or "there"
@@ -390,29 +423,28 @@ async def complete_onboarding(
     ip_addr = user.get("ip")
     now   = datetime.utcnow()
 
-    # Build topics from taxonomy
+    # Build keyword topics from taxonomy
     topics = build_topics_from_selections(
         selected_categories=request.selected_categories,
         selected_subcategories=request.selected_subcategories,
         ai_extras=request.ai_extras,
     )
 
-    # Extract AI keywords for filtering if extra interests were provided
-    # Removing onboarding_agent so we'll just extract simple words
+    # Simple keyword extraction from free-text extras (no AI required here)
     ai_keywords = []
     if request.ai_extras and request.ai_extras.strip():
         ai_keywords = [w.lower() for w in request.ai_extras.replace(",", " ").split() if len(w) > 3]
 
-    # Check if profile already exists (to preserve created_at)
+    # Preserve created_at for returning users updating preferences
     existing = await db.get_user_profile(uid)
     created_at = existing.created_at if existing else now
-    
-    # Geo lookup if IP changed or new
+
+    # Geo lookup (best-effort, non-blocking)
     city, country = None, None
     if existing:
-        city = existing.last_login_city
+        city    = existing.last_login_city
         country = existing.last_login_country
-        
+
     if ip_addr and (not existing or existing.last_login_ip != ip_addr):
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
@@ -420,7 +452,7 @@ async def complete_onboarding(
                 if resp.status_code == 200:
                     geo = resp.json()
                     if geo.get("status") == "success":
-                        city = geo.get("city")
+                        city    = geo.get("city")
                         country = geo.get("country")
         except Exception as e:
             logger.warning(f"Failed to resolve geo for IP {ip_addr}: {e}")
@@ -447,11 +479,9 @@ async def complete_onboarding(
 
     await db.save_user_profile(profile)
     logger.info(
-        f"Structured onboarding complete for {uid}: "
-        f"categories={request.selected_categories}"
+        f"Onboarding complete for {uid}: categories={request.selected_categories}"
     )
 
-    # Trigger immediate feed build in background
     background_tasks.add_task(feed_builder_job)
     return CompleteOnboardingResponse(status="processing", estimated_minutes=1)
 
@@ -470,9 +500,10 @@ async def get_my_profile(user=Depends(get_current_user)):
     """
     Return the authenticated user's interest profile from Firestore.
     Used by the frontend to pre-populate the preferences flow.
+    Only updates last_seen — does NOT reset scoring_paused.
     """
     uid = user["uid"]
-    await db.update_last_seen(uid)
+    await db.update_last_seen(uid)   # timestamp only; does not touch scoring_paused
     profile = await db.get_user_profile(uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
@@ -480,17 +511,29 @@ async def get_my_profile(user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Admin / testing  (no auth — restrict in production via Cloud Run IAM)
+# Admin endpoints — protected by X-Admin-Secret header
 # ---------------------------------------------------------------------------
 
-@app.post("/admin/rss/poll", summary="Trigger RSS poll (admin)", tags=["Admin"])
+@app.post(
+    "/admin/rss/poll",
+    summary="Trigger RSS poll (admin only)",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
 async def manual_rss_poll(background_tasks: BackgroundTasks):
+    """Manually trigger an RSS fetch + Gemini tagging cycle."""
     background_tasks.add_task(rss_polling_job)
     return {"message": "RSS polling triggered"}
 
 
-@app.post("/admin/scoring/run", summary="Trigger scoring job (admin)", tags=["Admin"])
+@app.post(
+    "/admin/scoring/run",
+    summary="Trigger feed builder (admin only)",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
 async def manual_scoring_run(background_tasks: BackgroundTasks):
+    """Manually trigger the feed builder job for all users."""
     background_tasks.add_task(feed_builder_job)
     return {"message": "Feed builder job triggered"}
 
@@ -504,7 +547,7 @@ async def health_check():
     return {
         "status":            "healthy",
         "service":           "UCKhabar API",
-        "version":           "1.0.0",
+        "version":           "2.0.0",
         "environment":       settings.APP_ENV,
         "scheduler_running": scheduler.running,
         "gemini_model":      settings.GEMINI_MODEL,

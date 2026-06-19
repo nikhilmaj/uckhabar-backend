@@ -8,6 +8,9 @@ content type booleans.
 
 These tags are saved to Firestore and used by plain Python logic later to 
 match against user preferences at zero additional AI cost.
+
+SDK: Uses the google-genai SDK (Vertex AI backend) instead of the deprecated
+vertexai SDK which was removed June 24, 2026.
 """
 
 import json
@@ -15,8 +18,8 @@ import logging
 import asyncio
 from typing import List, Dict
 
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
+from google import genai
+from google.genai import types
 
 from models.schemas import Article
 
@@ -84,7 +87,7 @@ Return ONLY a JSON array matching this exact schema for each article:
 
 class TaggingAgent:
     """
-    Tags a batch of articles during ingestion using Gemini.
+    Tags a batch of articles during ingestion using Gemini via the google-genai SDK.
 
     Usage (called by the RSS polling job):
         agent = TaggingAgent(project_id=..., location=..., model_name=...)
@@ -92,10 +95,13 @@ class TaggingAgent:
     """
 
     def __init__(self, project_id: str, location: str, model_name: str = "gemini-2.5-flash"):
-        vertexai.init(project=project_id, location=location)
-        self._model = GenerativeModel(
-            model_name=model_name,
-            system_instruction=TAGGING_SYSTEM_PROMPT,
+        self._model_name = model_name
+        self._system_instruction = TAGGING_SYSTEM_PROMPT
+        # Use Vertex AI backend so costs are billed to GCP project
+        self._client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location,
         )
 
     async def tag_articles(self, articles: List[Article], max_per_batch: int = 40) -> List[Article]:
@@ -129,9 +135,11 @@ class TaggingAgent:
         prompt = _build_tagging_prompt(articles)
 
         try:
-            response = await self._model.generate_content_async(
-                prompt,
-                generation_config=GenerationConfig(
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self._system_instruction,
                     response_mime_type="application/json",
                 ),
             )
@@ -140,7 +148,7 @@ class TaggingAgent:
                 raw_text = raw_text.split("\n", 1)[-1].rsplit("\n", 1)[0]
             tags_data = json.loads(raw_text)
         except (json.JSONDecodeError, Exception) as e:
-            # Graceful degradation — skip this batch rather than crashing
+            # Graceful degradation — skip this batch rather than crashing ingestion
             logger.warning(f"Tagging batch failed: {e}")
             return
 
@@ -160,6 +168,6 @@ class TaggingAgent:
                 "is_hard_news": bool(ct.get("is_hard_news", True)),
                 "is_editorial": bool(ct.get("is_editorial", False)),
                 "is_sponsored": bool(ct.get("is_sponsored", False)),
-                "is_explicit": bool(ct.get("is_explicit", False)),
+                "is_explicit":  bool(ct.get("is_explicit", False)),
                 "is_aggregated": bool(ct.get("is_aggregated", False))
             }

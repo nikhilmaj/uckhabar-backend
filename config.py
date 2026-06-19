@@ -7,6 +7,7 @@ A single `settings` singleton is imported everywhere in the app.
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -25,6 +26,23 @@ class Settings(BaseSettings):
     GCP_REGION:     str = Field(default="us-central1", description="GCP region for Vertex AI")
 
     # ------------------------------------------------------------------
+    # Security
+    # ------------------------------------------------------------------
+    ADMIN_SECRET: str = Field(
+        ...,
+        description="Secret token required for /admin/* endpoints. Set via Cloud Run env var."
+    )
+    ALLOWED_ORIGINS: List[str] = Field(
+        default=[
+            "https://uckhabar.web.app",
+            "https://uckhabar.firebaseapp.com",
+            "http://localhost:5500",
+            "http://localhost:3000",
+        ],
+        description="CORS allowed origins. Add your custom domain here if needed."
+    )
+
+    # ------------------------------------------------------------------
     # App
     # ------------------------------------------------------------------
     APP_ENV: str = Field(default="development")
@@ -34,8 +52,8 @@ class Settings(BaseSettings):
     # Feed tuning
     # ------------------------------------------------------------------
     MAX_ARTICLES_PER_FEED:        int = Field(default=50,  description="Max headlines per user feed")
-    RSS_POLL_INTERVAL_MINUTES:    int = Field(default=60,  description="How often to fetch RSS feeds (overridden by Cloud Scheduler)")
-    SCORING_INTERVAL_MINUTES:     int = Field(default=240, description="How often to run Gemini scoring (overridden by Cloud Scheduler)")
+    RSS_POLL_INTERVAL_MINUTES:    int = Field(default=60,  description="How often to fetch RSS feeds")
+    SCORING_INTERVAL_MINUTES:     int = Field(default=240, description="How often to run feed builder")
     ARTICLE_RETENTION_HOURS:      int = Field(default=48,  description="How old articles can be before scoring ignores them")
     MAX_ARTICLES_PER_GEMINI_CALL: int = Field(default=60,  description="Batch size sent to Gemini per call")
 
