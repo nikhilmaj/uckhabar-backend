@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     # Feed tuning
     # ------------------------------------------------------------------
     MAX_ARTICLES_PER_FEED:        int = Field(default=50,  description="Max headlines per user feed")
-    RSS_POLL_INTERVAL_MINUTES:    int = Field(default=60,  description="How often to fetch RSS feeds")
-    SCORING_INTERVAL_MINUTES:     int = Field(default=240, description="How often to run feed builder")
+    RSS_POLL_INTERVAL_MINUTES:    int = Field(default=20,  description="How often to fetch + Gemini-tag RSS feeds (minutes)")
+    SCORING_INTERVAL_MINUTES:     int = Field(default=30,  description="How often to run feed builder and distribute to users (minutes)")
     ARTICLE_RETENTION_HOURS:      int = Field(default=48,  description="How old articles can be before scoring ignores them")
     MAX_ARTICLES_PER_GEMINI_CALL: int = Field(default=60,  description="Batch size sent to Gemini per call")
 
