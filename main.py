@@ -91,16 +91,41 @@ async def verify_admin(x_admin_secret: str = Header(None)):
 # ---------------------------------------------------------------------------
 
 async def rss_polling_job() -> None:
-    """Every 60 min — fetch all RSS feeds, tag with Gemini, store new articles."""
+    """Every 20 min — fetch all RSS feeds, tag NEW articles with Gemini, store results."""
     logger.info("[Scheduler] RSS polling & tagging job started")
     try:
         articles = await fetch_all_feeds()
-        # V2: Tag articles at ingestion time (Gemini batch call, zero cost per user)
-        tagged_articles = await tagging_agent.tag_articles(articles)
-        saved = await db.save_articles(tagged_articles)
-        logger.info(f"[Scheduler] RSS poll & tag done — {saved} articles stored")
+        if not articles:
+            logger.info("[Scheduler] No articles fetched — skipping")
+            return
+
+        # Check which articles are already in Firestore (already tagged)
+        article_ids = [a.id for a in articles]
+        existing_ids = await db.get_existing_article_ids(article_ids)
+
+        new_articles      = [a for a in articles if a.id not in existing_ids]
+        existing_articles = [a for a in articles if a.id in existing_ids]
+
+        logger.info(
+            f"[Scheduler] {len(new_articles)} new articles to tag, "
+            f"{len(existing_articles)} already tagged (skipping Gemini)"
+        )
+
+        # Tag ONLY new articles — major cost saving vs re-tagging everything
+        if new_articles:
+            tagged = await tagging_agent.tag_articles(new_articles)
+            saved = await db.save_articles(tagged)
+            logger.info(f"[Scheduler] Saved {saved} newly tagged articles")
+
+        # For existing articles, just refresh fetched_at so they stay in recency window
+        # WITHOUT overwriting their existing categories/subcategories tags
+        if existing_articles:
+            await db.refresh_article_timestamps([a.id for a in existing_articles])
+
+        logger.info("[Scheduler] RSS poll & tag done")
     except Exception as exc:
         logger.error(f"[Scheduler] RSS polling/tagging failed: {exc}")
+
 
 
 async def feed_builder_job() -> None:

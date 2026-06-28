@@ -77,6 +77,59 @@ class DatabaseService:
         logger.info(f"[DB] Saved {total} articles to Firestore")
         return total
 
+    async def get_existing_article_ids(self, article_ids: List[str]) -> set:
+        """
+        Given a list of article IDs, return the subset that already exist in Firestore.
+        Used before Gemini tagging to skip articles that are already tagged —
+        avoids re-sending the same articles to Gemini every 20 minutes.
+
+        Uses Firestore batch get (one round trip for up to 100 docs at a time).
+        """
+        if not article_ids:
+            return set()
+
+        existing_ids: set = set()
+        chunk_size = 100   # Firestore batch get handles up to ~300 but 100 is safe
+
+        for i in range(0, len(article_ids), chunk_size):
+            chunk = article_ids[i : i + chunk_size]
+            refs = [self._db.collection("articles").document(aid) for aid in chunk]
+            async for snap in self._db.get_all(refs):
+                if snap.exists:
+                    existing_ids.add(snap.id)
+
+        logger.debug(f"[DB] {len(existing_ids)}/{len(article_ids)} articles already exist in Firestore")
+        return existing_ids
+
+    async def refresh_article_timestamps(self, article_ids: List[str]) -> None:
+        """
+        Update ONLY fetched_at for existing articles so they stay within the
+        72-hour recency window used by get_recent_articles.
+        Does NOT overwrite categories/subcategories/content_type tags.
+        Called for articles that are already tagged — avoids Gemini cost.
+        """
+        if not article_ids:
+            return
+
+        now = datetime.utcnow()
+        chunk_size = 499
+        count = 0
+        batch = self._db.batch()
+
+        for article_id in article_ids:
+            ref = self._db.collection("articles").document(article_id)
+            batch.update(ref, {"fetched_at": now})
+            count += 1
+            if count % chunk_size == 0:
+                await batch.commit()
+                batch = self._db.batch()
+
+        if count % chunk_size != 0:
+            await batch.commit()
+
+        logger.debug(f"[DB] Refreshed fetched_at for {count} existing articles")
+
+
     async def get_recent_articles(self, hours: int = 24) -> List[Article]:
         """
         Return all articles fetched within the last `hours` hours AND
