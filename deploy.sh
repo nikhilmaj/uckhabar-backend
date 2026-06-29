@@ -1,7 +1,8 @@
 #!/bin/bash
 # Deployment script for UCKhabar backend
-# --cpu-always-allocated: required so APScheduler background jobs fire reliably
 # --min-instances=1: prevents cold starts for users
+# NOTE: cpu-always-allocated is NOT set — Cloud Scheduler (not APScheduler) handles
+# background jobs via HTTP, so the instance only needs CPU during actual requests.
 
 set -e
 
@@ -20,7 +21,6 @@ gcloud run deploy uckhabar-backend \
   --min-instances=1 \
   --cpu=0.5 \
   --memory=512Mi \
-  --cpu-always-allocated \
   --set-env-vars="GCP_PROJECT_ID=$(gcloud config get-value project),GCP_REGION=us-central1,APP_ENV=production,ADMIN_SECRET=${ADMIN_SECRET}"
 
 echo "Deployment complete."

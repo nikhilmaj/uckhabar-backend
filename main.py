@@ -15,10 +15,10 @@ Admin endpoints (require X-Admin-Secret header):
   POST  /admin/rss/poll               — manually trigger RSS poll
   POST  /admin/scoring/run            — manually trigger scoring for all users
 
-Background jobs (APScheduler):
-  Every 60 min  → rss_polling_job()
-  Every 4 hours → feed_builder_job()
-  Every 24 hours → daily_cleanup_job()
+Background jobs (Cloud Scheduler → HTTP, not APScheduler):
+  Every 20 min  → POST /admin/rss/poll
+  Every 30 min  → POST /admin/scoring/run
+  Every 24 hours → POST /admin/cleanup/run
 """
 
 import asyncio
@@ -29,8 +29,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import uvicorn
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header
+from fastapi import Depends, FastAPI, HTTPException, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -68,7 +67,7 @@ tagging_agent = TaggingAgent(
     model_name=settings.GEMINI_MODEL,
 )
 db = DatabaseService(project_id=settings.GCP_PROJECT_ID)
-scheduler = AsyncIOScheduler(timezone="UTC")
+# Scheduling is handled by Google Cloud Scheduler (external HTTP calls to /admin/* endpoints)
 
 # ---------------------------------------------------------------------------
 # Security — Admin dependency
@@ -258,27 +257,13 @@ async def daily_cleanup_job() -> None:
 async def lifespan(app: FastAPI):
     logger.info("UCKhabar backend starting…")
 
-    scheduler.add_job(rss_polling_job, "interval",
-                      minutes=settings.RSS_POLL_INTERVAL_MINUTES,
-                      id="rss_poll", max_instances=1)
-    scheduler.add_job(feed_builder_job, "interval",
-                      minutes=settings.SCORING_INTERVAL_MINUTES,
-                      id="scoring", max_instances=1)
-    scheduler.add_job(daily_cleanup_job, "interval",
-                      hours=24,
-                      id="daily_cleanup", max_instances=1)
-    scheduler.start()
-
-    # Warm up article pool immediately on startup
+    # Warm up article pool immediately on startup (first RSS fetch + Gemini tag).
+    # Ongoing scheduling is handled externally by Google Cloud Scheduler,
+    # which calls POST /admin/rss/poll every 20 min and POST /admin/scoring/run every 30 min.
     asyncio.create_task(rss_polling_job())
 
-    logger.info(
-        f"Scheduler live. RSS every {settings.RSS_POLL_INTERVAL_MINUTES} min, "
-        f"scoring every {settings.SCORING_INTERVAL_MINUTES} min, cleanup every 24h."
-    )
+    logger.info("UCKhabar backend started. Background jobs managed by Cloud Scheduler.")
     yield
-
-    scheduler.shutdown(wait=False)
     logger.info("UCKhabar backend shut down.")
 
 
@@ -536,31 +521,66 @@ async def get_my_profile(user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Activity ping  (auth required)
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/activity",
+    summary="Update last_seen timestamp (called by frontend on each visit)",
+    tags=["Feed"],
+)
+async def record_activity(user=Depends(get_current_user)):
+    """
+    Lightweight endpoint called by the frontend on each page load.
+    Updates the user's last_seen timestamp so the inactivity logic
+    (7-day pause / 60-day cleanup) stays accurate without requiring
+    the frontend to call the heavier /feed/me endpoint.
+    """
+    uid = user["uid"]
+    await db.update_last_seen(uid)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Admin endpoints — protected by X-Admin-Secret header
+# Called by Google Cloud Scheduler; run synchronously so Cloud Scheduler
+# waits for completion before marking the job as succeeded.
 # ---------------------------------------------------------------------------
 
 @app.post(
     "/admin/rss/poll",
-    summary="Trigger RSS poll (admin only)",
+    summary="Trigger RSS poll (admin only — called by Cloud Scheduler every 20 min)",
     tags=["Admin"],
     dependencies=[Depends(verify_admin)],
 )
-async def manual_rss_poll(background_tasks: BackgroundTasks):
-    """Manually trigger an RSS fetch + Gemini tagging cycle."""
-    background_tasks.add_task(rss_polling_job)
-    return {"message": "RSS polling triggered"}
+async def manual_rss_poll():
+    """Fetch all RSS feeds, tag only NEW articles via Gemini, persist to Firestore."""
+    await rss_polling_job()
+    return {"message": "RSS polling complete"}
 
 
 @app.post(
     "/admin/scoring/run",
-    summary="Trigger feed builder (admin only)",
+    summary="Trigger feed builder (admin only — called by Cloud Scheduler every 30 min)",
     tags=["Admin"],
     dependencies=[Depends(verify_admin)],
 )
-async def manual_scoring_run(background_tasks: BackgroundTasks):
-    """Manually trigger the feed builder job for all users."""
-    background_tasks.add_task(feed_builder_job)
-    return {"message": "Feed builder job triggered"}
+async def manual_scoring_run():
+    """Run the feed builder for all active users and write updated user_feeds to Firestore."""
+    await feed_builder_job()
+    return {"message": "Feed builder complete"}
+
+
+@app.post(
+    "/admin/cleanup/run",
+    summary="Delete articles older than 7 days (admin only — called by Cloud Scheduler daily)",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
+async def manual_cleanup_run():
+    """Delete articles older than 7 days from Firestore to control storage costs."""
+    await daily_cleanup_job()
+    return {"message": "Cleanup complete"}
 
 
 # ---------------------------------------------------------------------------
