@@ -1,12 +1,14 @@
 #!/bin/bash
 # Deployment script for UCKhabar backend
-# --min-instances=1: prevents cold starts for users
-# NOTE: cpu-always-allocated is NOT set — Cloud Scheduler (not APScheduler) handles
-# background jobs via HTTP, so the instance only needs CPU during actual requests.
+# --min-instances=1       : keeps one warm instance — no cold starts for users
+# --timeout=300           : allows admin endpoints (RSS poll, scoring) up to 5 min
+# --concurrency=80        : FastAPI is async; handle many requests per instance
+# --cpu-always-allocated is NOT set — Cloud Scheduler triggers admin jobs via HTTP,
+#   CPU is only billed during actual request processing.
 
 set -e
 
-echo "Deploying UCKhabar Backend to Cloud Run..."
+echo "Deploying UCKhabar Backend to Cloud Run (asia-south1)..."
 
 if [ -z "$ADMIN_SECRET" ]; then
   echo "ERROR: ADMIN_SECRET environment variable is not set."
@@ -16,11 +18,14 @@ fi
 
 gcloud run deploy uckhabar-backend \
   --source . \
-  --region us-central1 \
+  --region asia-south1 \
   --allow-unauthenticated \
   --min-instances=1 \
-  --cpu=0.5 \
+  --max-instances=3 \
+  --cpu=1 \
   --memory=512Mi \
-  --set-env-vars="GCP_PROJECT_ID=$(gcloud config get-value project),GCP_REGION=us-central1,APP_ENV=production,ADMIN_SECRET=${ADMIN_SECRET}"
+  --timeout=300 \
+  --concurrency=80 \
+  --set-env-vars="GCP_PROJECT_ID=$(gcloud config get-value project),GCP_REGION=asia-south1,APP_ENV=production,ADMIN_SECRET=${ADMIN_SECRET}"
 
 echo "Deployment complete."
