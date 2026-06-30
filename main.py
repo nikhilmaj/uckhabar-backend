@@ -135,8 +135,8 @@ async def feed_builder_job() -> None:
     """
     logger.info("[Scheduler] Feed builder job started")
     try:
-        # V2: Strict 3-day recency rule
-        articles = await db.get_recent_articles(hours=72)
+        # V2: Expanded 5-day recency rule to ensure enough articles per category
+        articles = await db.get_recent_articles(hours=120)
         profiles = await db.get_all_user_profiles()
         logger.info(f"[Scheduler] Matching {len(articles)} articles for {len(profiles)} users")
 

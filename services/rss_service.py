@@ -16,6 +16,7 @@ Sources chosen to cover:
 import asyncio
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Optional
@@ -53,9 +54,10 @@ MAX_DESCRIPTION  = 500    # chars — trim long descriptions to save Firestore b
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _article_id(url: str) -> str:
-    """Stable, collision-resistant ID from the article URL."""
-    return hashlib.md5(url.encode("utf-8")).hexdigest()
+def _article_id(title: str) -> str:
+    """Stable, collision-resistant ID from the article title (prevents duplicate tagging if URLs change)."""
+    clean_title = re.sub(r'[^a-zA-Z0-9]+', '', title).lower()
+    return hashlib.md5(clean_title.encode("utf-8")).hexdigest()
 
 
 def _parse_rfc2822(date_str: Optional[str]) -> Optional[datetime]:
@@ -116,13 +118,13 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
 
             published_at = _parse_rfc2822(entry.get("published"))
 
-            # Skip articles older than 3 days (or missing dates) to save Gemini tagging costs,
-            # since feed_builder only uses articles from the last 72 hours.
-            if not published_at or (datetime.utcnow() - published_at).days > 3:
+            # Skip articles older than 5 days (or missing dates) to save Gemini tagging costs,
+            # since feed_builder only uses articles from the last 120 hours.
+            if not published_at or (datetime.utcnow() - published_at).days > 5:
                 continue
 
             articles.append(Article(
-                id=_article_id(url),
+                id=_article_id(title),
                 title=title,
                 description=description if description else None,
                 url=url,

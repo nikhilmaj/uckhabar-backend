@@ -54,7 +54,7 @@ ARTICLES TO TAG:
 {json.dumps(articles_payload, indent=2)}
 
 TAGGING RULES:
-1. categories: Array of strings. Must strictly be from this list: ["Geopolitics", "Finance", "AI", "Politics", "Technology", "International News", "Cricket", "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"]. If none apply, use an empty array [].
+1. categories: Array of strings. Must strictly be from this list: ["Geopolitics", "Finance", "AI", "Politics", "Technology", "Science & Research", "Health & Medicine", "Business & Industry", "Defence & Military", "Environment & Climate", "International News", "Law & Justice", "Social Issues", "Entertainment", "Cricket", "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"]. If none apply, use an empty array [].
 2. subcategories: Array of strings. Extract specific topics (e.g. "Indian Economy", "Rockstar Games", "Startups & VC", etc.). Be specific but concise. Max 3.
 3. content_type: Object with 5 exact boolean fields:
    - "is_hard_news": true if factual reporting on events, false otherwise.
