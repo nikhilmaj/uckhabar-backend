@@ -257,10 +257,10 @@ async def daily_cleanup_job() -> None:
 async def lifespan(app: FastAPI):
     logger.info("UCKhabar backend starting…")
 
-    # Warm up article pool immediately on startup (first RSS fetch + Gemini tag).
-    # Ongoing scheduling is handled externally by Google Cloud Scheduler,
-    # which calls POST /admin/rss/poll every 20 min and POST /admin/scoring/run every 30 min.
-    asyncio.create_task(rss_polling_job())
+    # NOTE: RSS polling and feed building are handled ENTIRELY by Google Cloud Scheduler
+    # via HTTP calls to /admin/rss/poll and /admin/scoring/run.
+    # We do NOT trigger a poll on startup to avoid surprise Gemini costs on every
+    # redeployment or Cloud Run cold start.
 
     logger.info("UCKhabar backend started. Background jobs managed by Cloud Scheduler.")
     yield
