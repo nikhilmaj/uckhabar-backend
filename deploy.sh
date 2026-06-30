@@ -18,6 +18,7 @@ fi
 
 gcloud run deploy uckhabar-backend \
   --source . \
+  --project uckhabar \
   --region asia-south1 \
   --allow-unauthenticated \
   --min-instances=1 \
@@ -26,6 +27,6 @@ gcloud run deploy uckhabar-backend \
   --memory=512Mi \
   --timeout=300 \
   --concurrency=80 \
-  --set-env-vars="GCP_PROJECT_ID=$(gcloud config get-value project),GCP_REGION=asia-south1,APP_ENV=production,ADMIN_SECRET=${ADMIN_SECRET}"
+  --set-env-vars="GCP_PROJECT_ID=uckhabar,GCP_REGION=asia-south1,APP_ENV=production,ADMIN_SECRET=${ADMIN_SECRET}"
 
 echo "Deployment complete."

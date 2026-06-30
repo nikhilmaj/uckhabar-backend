@@ -16,12 +16,34 @@ vertexai SDK which was removed June 24, 2026.
 import json
 import logging
 import asyncio
-from typing import List, Dict
+from pydantic import BaseModel
+from typing import List, Dict, Literal
 
 from google import genai
 from google.genai import types
 
 from models.schemas import Article
+
+CategoryEnum = Literal[
+    "Geopolitics", "Finance", "AI", "Politics", "Technology", "Science & Research", 
+    "Health & Medicine", "Business & Industry", "Defence & Military", "Environment & Climate", 
+    "International News", "Law & Justice", "Social Issues", "Entertainment", "Cricket", 
+    "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"
+]
+
+class ContentTypeTag(BaseModel):
+    is_hard_news: bool
+    is_editorial: bool
+    is_sponsored: bool
+    is_explicit: bool
+    is_aggregated: bool
+
+class ArticleTag(BaseModel):
+    article_id: str
+    categories: List[CategoryEnum]
+    subcategories: List[str]
+    content_type: ContentTypeTag
+
 
 logger = logging.getLogger("uckhabar.tagging")
 
@@ -141,6 +163,7 @@ class TaggingAgent:
                 config=types.GenerateContentConfig(
                     system_instruction=self._system_instruction,
                     response_mime_type="application/json",
+                    response_schema=list[ArticleTag],
                 ),
             )
             raw_text = response.text.strip()
