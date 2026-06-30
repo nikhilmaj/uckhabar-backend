@@ -590,12 +590,12 @@ async def manual_cleanup_run():
 @app.get("/health", summary="Health check", tags=["System"])
 async def health_check():
     return {
-        "status":            "healthy",
-        "service":           "UCKhabar API",
-        "version":           "2.0.0",
-        "environment":       settings.APP_ENV,
-        "scheduler_running": scheduler.running,
-        "gemini_model":      settings.GEMINI_MODEL,
+        "status":       "healthy",
+        "service":      "UCKhabar API",
+        "version":      "2.0.0",
+        "environment":  settings.APP_ENV,
+        "scheduler":    "managed by Google Cloud Scheduler (external)",
+        "gemini_model": settings.GEMINI_MODEL,
     }
 
 

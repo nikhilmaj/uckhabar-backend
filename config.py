@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Google Cloud
     # ------------------------------------------------------------------
     GCP_PROJECT_ID: str = Field(..., description="GCP project ID")
-    GCP_REGION:     str = Field(default="us-central1", description="GCP region for Vertex AI")
+    GCP_REGION:     str = Field(default="asia-south1", description="GCP region for Vertex AI")
 
     # ------------------------------------------------------------------
     # Security
