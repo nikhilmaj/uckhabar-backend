@@ -560,6 +560,26 @@ async def manual_rss_poll():
 
 
 @app.post(
+    "/admin/rss/retag",
+    summary="Re-tag recent articles from Firestore with current schema (admin only)",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
+async def manual_rss_retag():
+    """Fetch articles from last 48 hours and re-tag them with the current Gemini schema."""
+    articles_db = await db.get_recent_articles(hours=48)
+    if not articles_db:
+        return {"message": "No recent articles found to re-tag"}
+    batch_size = 20
+    total_updated = 0
+    for i in range(0, len(articles_db), batch_size):
+        batch = articles_db[i:i+batch_size]
+        tagged_results = await tagging_agent.tag_articles(batch)
+        total_updated += await db.save_articles(tagged_results)
+    return {"message": f"Successfully re-tagged {total_updated} articles"}
+
+
+@app.post(
     "/admin/scoring/run",
     summary="Trigger feed builder (admin only — called by Cloud Scheduler every 30 min)",
     tags=["Admin"],
