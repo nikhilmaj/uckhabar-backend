@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deployment script for UCKhabar backend
-# --min-instances=1       : keeps one warm instance — no cold starts for users
+# --min-instances=0       : scales to zero when idle — literally $0 cost when not processing requests
 # --timeout=300           : allows admin endpoints (RSS poll, scoring) up to 5 min
 # --concurrency=80        : FastAPI is async; handle many requests per instance
 # --cpu-always-allocated is NOT set — Cloud Scheduler triggers admin jobs via HTTP,
@@ -21,7 +21,7 @@ gcloud run deploy uckhabar-backend \
   --project uckhabar \
   --region asia-south1 \
   --allow-unauthenticated \
-  --min-instances=1 \
+  --min-instances=0 \
   --max-instances=3 \
   --cpu=1 \
   --memory=512Mi \
