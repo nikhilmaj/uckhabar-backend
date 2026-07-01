@@ -23,6 +23,7 @@ Background jobs (Cloud Scheduler → HTTP, not APScheduler):
 
 import asyncio
 import logging
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -137,8 +138,18 @@ async def feed_builder_job() -> None:
     try:
         # V2: Expanded 5-day recency rule to ensure enough articles per category
         articles = await db.get_recent_articles(hours=120)
+        seen_titles = set()
+        unique_articles = []
+        for a in articles:
+            clean_t = re.sub(r'[^a-zA-Z0-9]+', '', a.title).lower() if a.title else ""
+            if clean_t and clean_t not in seen_titles:
+                seen_titles.add(clean_t)
+                unique_articles.append(a)
+            elif not clean_t:
+                unique_articles.append(a)
+        articles = unique_articles
         profiles = await db.get_all_user_profiles()
-        logger.info(f"[Scheduler] Matching {len(articles)} articles for {len(profiles)} users")
+        logger.info(f"[Scheduler] Matching {len(articles)} unique articles for {len(profiles)} users")
 
         now = datetime.now(timezone.utc)
         skipped = 0
@@ -360,8 +371,17 @@ async def get_discovery_feed():
     Used on the waiting screen while a new user's personalised feed is built.
     """
     articles = await db.get_recent_articles(hours=48)
+    seen_titles = set()
+    unique_articles = []
+    for a in articles:
+        clean_t = re.sub(r'[^a-zA-Z0-9]+', '', a.title).lower() if a.title else ""
+        if clean_t and clean_t not in seen_titles:
+            seen_titles.add(clean_t)
+            unique_articles.append(a)
+        elif not clean_t:
+            unique_articles.append(a)
     sorted_articles = sorted(
-        articles,
+        unique_articles,
         key=lambda a: (
             a.published_at
             if a.published_at and a.published_at.tzinfo
