@@ -138,6 +138,13 @@ async def feed_builder_job() -> None:
     try:
         # V2: Expanded 5-day recency rule to ensure enough articles per category
         articles = await db.get_recent_articles(hours=120)
+        articles.sort(
+            key=lambda a: (
+                len(a.categories or []),
+                a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
+            ),
+            reverse=True,
+        )
         seen_titles = set()
         unique_articles = []
         for a in articles:
@@ -371,6 +378,13 @@ async def get_discovery_feed():
     Used on the waiting screen while a new user's personalised feed is built.
     """
     articles = await db.get_recent_articles(hours=48)
+    articles.sort(
+        key=lambda a: (
+            len(a.categories or []),
+            a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
     seen_titles = set()
     unique_articles = []
     for a in articles:
@@ -586,8 +600,8 @@ async def manual_rss_poll():
     dependencies=[Depends(verify_admin)],
 )
 async def manual_rss_retag():
-    """Fetch articles from last 48 hours and re-tag them with the current Gemini schema."""
-    articles_db = await db.get_recent_articles(hours=48)
+    """Fetch articles from last 120 hours and re-tag them with the current Gemini schema."""
+    articles_db = await db.get_recent_articles(hours=120)
     if not articles_db:
         return {"message": "No recent articles found to re-tag"}
     batch_size = 20
