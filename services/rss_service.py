@@ -19,6 +19,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+import calendar
 from typing import List, Optional
 
 import feedparser
@@ -64,13 +65,32 @@ def _article_id(title: str) -> str:
     return hashlib.md5(clean_title.encode("utf-8")).hexdigest()
 
 
-def _parse_rfc2822(date_str: Optional[str]) -> Optional[datetime]:
-    """Parse an RFC 2822 date string into a naive UTC datetime."""
+def _parse_article_date(entry: dict) -> Optional[datetime]:
+    """Parse article publication datetime into a naive UTC datetime from feedparser entry."""
+    # 1. Best approach: feedparser's built-in time tuple (works for RSS, Atom, ISO 8601, RFC 2822)
+    time_tuple = entry.get("published_parsed") or entry.get("updated_parsed")
+    if time_tuple:
+        try:
+            ts = calendar.timegm(time_tuple)
+            return datetime.fromtimestamp(ts, timezone.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+
+    # 2. Fallback to string parsing
+    date_str = entry.get("published") or entry.get("updated") or entry.get("pubDate")
     if not date_str:
         return None
     try:
         dt = parsedate_to_datetime(date_str)
-        # Convert to UTC and strip tzinfo so it is naive, matching the rest of the app
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    except Exception:
+        pass
+    try:
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            return dt
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
     except Exception:
         pass
@@ -120,7 +140,7 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
                 entry.get("summary") or entry.get("description") or ""
             ).strip()[:MAX_DESCRIPTION]
 
-            published_at = _parse_rfc2822(entry.get("published"))
+            published_at = _parse_article_date(entry)
 
             # Skip articles older than 5 days (or missing dates) to save Gemini tagging costs,
             # since feed_builder only uses articles from the last 120 hours.
