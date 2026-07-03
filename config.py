@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Gemini
     # ------------------------------------------------------------------
     GEMINI_MODEL:   str = Field(
-        default="gemini-1.5-flash",
+        default="gemini-1.5-flash-002",
         description="Gemini model identifier"
     )
 
