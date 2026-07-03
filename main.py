@@ -427,6 +427,9 @@ async def refresh_my_feed(
             detail="No profile found. Complete onboarding first.",
         )
 
+    if profile.scoring_paused:
+        await db.unpause_user(uid)
+
     background_tasks.add_task(feed_builder_job)
     return {"message": "Feed refresh triggered", "user_id": uid}
 
