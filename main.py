@@ -139,9 +139,7 @@ async def feed_builder_job() -> None:
         # V2: Expanded 5-day recency rule to ensure enough articles per category
         articles = await db.get_recent_articles(hours=120)
         articles.sort(
-            key=lambda a: (
-                a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
-            ),
+            key=lambda a: a.published_at.timestamp() if a.published_at else 0,
             reverse=True,
         )
         seen_titles = set()
@@ -378,9 +376,7 @@ async def get_discovery_feed():
     """
     articles = await db.get_recent_articles(hours=48)
     articles.sort(
-        key=lambda a: (
-            a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
-        ),
+        key=lambda a: a.published_at.timestamp() if a.published_at else 0,
         reverse=True,
     )
     seen_titles = set()
@@ -394,11 +390,7 @@ async def get_discovery_feed():
             unique_articles.append(a)
     sorted_articles = sorted(
         unique_articles,
-        key=lambda a: (
-            a.published_at
-            if a.published_at and a.published_at.tzinfo
-            else datetime.min.replace(tzinfo=timezone.utc)
-        ),
+        key=lambda a: a.published_at.timestamp() if a.published_at else 0,
         reverse=True,
     )[:20]
     return {
@@ -602,7 +594,7 @@ async def manual_rss_retag():
     articles_db = await db.get_recent_articles(hours=120)
     if not articles_db:
         return {"message": "No recent articles found in database"}
-    uncategorized = [a for a in articles_db if not a.categories]
+    uncategorized = [a for a in articles_db if not a.categories][:200]
     if not uncategorized:
         return {"message": "All recent articles already have categories!"}
     batch_size = 20

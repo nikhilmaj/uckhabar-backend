@@ -96,9 +96,13 @@ class DatabaseService:
             refs = [self._db.collection("articles").document(aid) for aid in chunk]
             async for snap in self._db.get_all(refs):
                 if snap.exists:
-                    existing_ids.add(snap.id)
+                    d = snap.to_dict() or {}
+                    # Only consider an article "existing" if it actually has category tags.
+                    # If it was saved untagged during an AI failure, allow it to be re-tagged.
+                    if d.get("categories"):
+                        existing_ids.add(snap.id)
 
-        logger.debug(f"[DB] {len(existing_ids)}/{len(article_ids)} articles already exist in Firestore")
+        logger.debug(f"[DB] {len(existing_ids)}/{len(article_ids)} articles already exist and are tagged in Firestore")
         return existing_ids
 
     async def refresh_article_timestamps(self, article_ids: List[str]) -> None:
