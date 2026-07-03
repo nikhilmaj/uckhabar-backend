@@ -140,7 +140,6 @@ async def feed_builder_job() -> None:
         articles = await db.get_recent_articles(hours=120)
         articles.sort(
             key=lambda a: (
-                len(a.categories or []),
                 a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
             ),
             reverse=True,
@@ -380,7 +379,6 @@ async def get_discovery_feed():
     articles = await db.get_recent_articles(hours=48)
     articles.sort(
         key=lambda a: (
-            len(a.categories or []),
             a.published_at if a.published_at and a.published_at.tzinfo else datetime.min.replace(tzinfo=timezone.utc),
         ),
         reverse=True,

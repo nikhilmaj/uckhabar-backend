@@ -43,6 +43,10 @@ RSS_SOURCES: dict[str, str] = {
     "VentureBeat": "https://feeds.feedburner.com/venturebeat/SZYF",
     "Times of India": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
     "Variety":    "https://variety.com/feed/",
+    "BBC Sport":  "https://feeds.bbci.co.uk/sport/football/rss.xml",
+    "ESPN":       "https://www.espn.com/espn/rss/soccer/news",
+    "Sky Sports": "https://www.skysports.com/rss/12040",
+    "TOI Sports": "https://timesofindia.indiatimes.com/rssfeeds/4719148.cms",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source
