@@ -119,11 +119,11 @@ class TaggingAgent:
     def __init__(self, project_id: str, location: str, model_name: str = "gemini-2.5-flash"):
         self._model_name = model_name
         self._system_instruction = TAGGING_SYSTEM_PROMPT
-        # Use Vertex AI backend in us-central1 for 100% Gemini Flash availability
+        # Use Vertex AI backend so costs are billed to GCP project
         self._client = genai.Client(
             vertexai=True,
             project=project_id,
-            location="us-central1",
+            location=location,
         )
 
     async def tag_articles(self, articles: List[Article], max_per_batch: int = 40) -> List[Article]:

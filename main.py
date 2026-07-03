@@ -600,17 +600,21 @@ async def manual_rss_poll():
     dependencies=[Depends(verify_admin)],
 )
 async def manual_rss_retag():
-    """Fetch articles from last 120 hours and re-tag them with the current Gemini schema."""
+    """Fetch uncategorized articles from last 120 hours and tag them with Gemini."""
     articles_db = await db.get_recent_articles(hours=120)
     if not articles_db:
-        return {"message": "No recent articles found to re-tag"}
+        return {"message": "No recent articles found in database"}
+    uncategorized = [a for a in articles_db if not a.categories]
+    if not uncategorized:
+        return {"message": "All recent articles already have categories!"}
     batch_size = 20
     total_updated = 0
-    for i in range(0, len(articles_db), batch_size):
-        batch = articles_db[i:i+batch_size]
+    for i in range(0, len(uncategorized), batch_size):
+        batch = uncategorized[i:i+batch_size]
         tagged_results = await tagging_agent.tag_articles(batch)
         total_updated += await db.save_articles(tagged_results)
-    return {"message": f"Successfully re-tagged {total_updated} articles"}
+        await asyncio.sleep(1)  # Pace requests to prevent Vertex AI rate limiting
+    return {"message": f"Successfully tagged {total_updated} out of {len(uncategorized)} uncategorized articles"}
 
 
 @app.post(
