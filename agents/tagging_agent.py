@@ -164,6 +164,8 @@ class TaggingAgent:
                     system_instruction=self._system_instruction,
                     response_mime_type="application/json",
                     response_schema=list[ArticleTag],
+                    temperature=0.0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
             raw_text = response.text.strip()
