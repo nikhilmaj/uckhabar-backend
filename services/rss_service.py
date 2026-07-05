@@ -48,6 +48,8 @@ RSS_SOURCES: dict[str, str] = {
     "ESPN":       "https://www.espn.com/espn/rss/soccer/news",
     "Sky Sports": "https://www.skysports.com/rss/12040",
     "TOI Sports": "https://timesofindia.indiatimes.com/rssfeeds/4719148.cms",
+    "Polygon":    "https://www.polygon.com/rss/index.xml",
+    "GamesRadar": "https://www.gamesradar.com/rss/",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source
