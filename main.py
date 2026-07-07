@@ -597,9 +597,9 @@ async def manual_rss_retag():
     articles_db = await db.get_recent_articles(hours=120)
     if not articles_db:
         return {"message": "No recent articles found in database"}
-    uncategorized = [a for a in articles_db if not a.categories][:200]
+    uncategorized = [a for a in articles_db if not a.ai_tagged and not a.categories and not a.subcategories][:200]
     if not uncategorized:
-        return {"message": "All recent articles already have categories!"}
+        return {"message": "All recent articles have already been tagged!"}
     batch_size = 20
     total_updated = 0
     for i in range(0, len(uncategorized), batch_size):

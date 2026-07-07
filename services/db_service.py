@@ -97,9 +97,9 @@ class DatabaseService:
             async for snap in self._db.get_all(refs):
                 if snap.exists:
                     d = snap.to_dict() or {}
-                    # Only consider an article "existing" if it actually has category tags.
-                    # If it was saved untagged during an AI failure, allow it to be re-tagged.
-                    if d.get("categories"):
+                    # Consider an article "existing" if it has already been processed by Gemini (ai_tagged=True)
+                    # OR if it already has category or subcategory tags from a previous run.
+                    if d.get("ai_tagged") is True or bool(d.get("categories")) or bool(d.get("subcategories")):
                         existing_ids.add(snap.id)
 
         logger.debug(f"[DB] {len(existing_ids)}/{len(article_ids)} articles already exist and are tagged in Firestore")

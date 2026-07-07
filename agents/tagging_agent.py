@@ -176,6 +176,9 @@ class TaggingAgent:
             logger.warning(f"Tagging batch failed: {e}")
             return
 
+        for a in articles:
+            a.ai_tagged = True
+
         for item in tags_data:
             article_id = item.get("article_id", "")
             if article_id not in article_map:

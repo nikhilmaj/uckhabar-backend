@@ -100,6 +100,7 @@ class Article(BaseModel):
     fetched_at:   datetime = Field(default_factory=datetime.utcnow)
     
     # V2 Tagging Fields (populated by tagging agent)
+    ai_tagged:     bool = False
     categories:    List[str] = Field(default_factory=list)
     subcategories: List[str] = Field(default_factory=list)
     content_type:  Dict[str, bool] = Field(default_factory=lambda: {

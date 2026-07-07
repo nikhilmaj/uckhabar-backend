@@ -17,9 +17,9 @@ async def main():
     articles_db = await db.get_recent_articles(hours=72)
     print(f"Found {len(articles_db)} total articles in the last 72 hours.")
     
-    # Filter those that don't have categories (or maybe just retag all of them to be safe)
-    # The user said "gemini hasn't read the existing articles yet... so we need gemini to run through the last 3 days articles"
-    # We'll retag all of them.
+    # Filter those that haven't been tagged by AI or assigned categories yet
+    articles_db = [a for a in articles_db if not a.ai_tagged and not a.categories and not a.subcategories]
+    print(f"Found {len(articles_db)} untagged articles needing processing.")
     
     tagger = TaggingAgent(
         project_id=settings.GCP_PROJECT_ID,
