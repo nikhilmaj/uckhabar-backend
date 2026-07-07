@@ -149,14 +149,16 @@ class DatabaseService:
         cutoff_fetched   = datetime.now(timezone.utc) - timedelta(hours=hours)
         cutoff_published = datetime.now(timezone.utc) - timedelta(days=7)
 
-        docs = (
+        query = (
             self._db.collection("articles")
             .where("fetched_at", ">=", cutoff_fetched)
-            .stream()
+            .order_by("fetched_at", direction=firestore.Query.DESCENDING)
+            .limit(2000)
         )
+        docs = await query.get()
 
         articles: List[Article] = []
-        async for doc in docs:
+        for doc in docs:
             try:
                 d = doc.to_dict()
                 published_at = d.get("published_at")

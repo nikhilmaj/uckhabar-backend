@@ -237,8 +237,8 @@ async def feed_builder_job() -> None:
                     reverse=True,
                 )
 
-                # Cap at 300 articles for fast Firestore commits without index or deadline timeouts
-                user_feed = user_feed[:300]
+                # Cap at 1000 articles to provide 4-5 days of comprehensive history across all selected topics
+                user_feed = user_feed[:1000]
 
                 feed = UserFeed(
                     user_id=profile.user_id,
