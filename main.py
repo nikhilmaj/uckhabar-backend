@@ -160,90 +160,97 @@ async def feed_builder_job() -> None:
         pruned = 0
 
         for profile in profiles:
-            # --- Inactive user management ---
-            if profile.last_seen:
-                days_inactive = (now - profile.last_seen.replace(tzinfo=timezone.utc)).days
+            try:
+                # --- Inactive user management ---
+                if profile.last_seen:
+                    days_inactive = (now - profile.last_seen.replace(tzinfo=timezone.utc)).days
 
-                if days_inactive >= 60:
-                    # Delete their stale feed to free Firestore space; KEEP the profile
-                    # so we maintain a historical record of all users (active + past).
-                    await db.delete_user_feed_only(profile.user_id)
-                    await db.set_scoring_paused(profile.user_id, True)
-                    logger.info(
-                        f"[Scheduler] Pruned feed for 60d+ inactive user {profile.user_id}"
-                    )
-                    pruned += 1
-                    continue
+                    if days_inactive >= 60:
+                        # Delete their stale feed to free Firestore space; KEEP the profile
+                        # so we maintain a historical record of all users (active + past).
+                        await db.delete_user_feed_only(profile.user_id)
+                        await db.set_scoring_paused(profile.user_id, True)
+                        logger.info(
+                            f"[Scheduler] Pruned feed for 60d+ inactive user {profile.user_id}"
+                        )
+                        pruned += 1
+                        continue
 
-                if days_inactive >= 7 and not profile.scoring_paused:
-                    await db.set_scoring_paused(profile.user_id, True)
-                    logger.info(
-                        f"[Scheduler] Paused scoring for user {profile.user_id} ({days_inactive}d inactive)"
-                    )
+                    if days_inactive >= 7 and not profile.scoring_paused:
+                        await db.set_scoring_paused(profile.user_id, True)
+                        logger.info(
+                            f"[Scheduler] Paused scoring for user {profile.user_id} ({days_inactive}d inactive)"
+                        )
+                        skipped += 1
+                        continue
+
+                if profile.scoring_paused:
                     skipped += 1
                     continue
 
-            if profile.scoring_paused:
-                skipped += 1
-                continue
+                # --- Feed Matching (No AI — pure Python keyword/category matching) ---
+                user_feed = []
+                user_cats = set(profile.selected_categories)
 
-            # --- Feed Matching (No AI — pure Python keyword/category matching) ---
-            user_feed = []
-            user_cats = set(profile.selected_categories)
+                # Combine all selected subcategories into a single flat set
+                user_subs = set()
+                for subs in profile.selected_subcategories.values():
+                    for s in subs:
+                        user_subs.add(s)
 
-            # Combine all selected subcategories into a single flat set
-            user_subs = set()
-            for subs in profile.selected_subcategories.values():
-                for s in subs:
-                    user_subs.add(s)
+                for a in articles:
+                    # 1. Apply Content Filters
+                    cf = profile.content_filters
+                    act = a.content_type
 
-            for a in articles:
-                # 1. Apply Content Filters
-                cf = profile.content_filters
-                act = a.content_type
+                    # If user disabled a filter and the article IS that type → reject it
+                    if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
+                    if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
+                    if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
+                    if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
+                    if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
 
-                # If user disabled a filter and the article IS that type → reject it
-                if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
-                if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
-                if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
-                if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
-                if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
+                    # 2. Category/Subcategory match
+                    article_cats = set(a.categories)
+                    article_subs = set(a.subcategories)
 
-                # 2. Category/Subcategory match
-                article_cats = set(a.categories)
-                article_subs = set(a.subcategories)
+                    matched = bool(
+                        user_cats.intersection(article_cats) or
+                        user_subs.intersection(article_subs)
+                    )
 
-                matched = bool(
-                    user_cats.intersection(article_cats) or
-                    user_subs.intersection(article_subs)
+                    if matched:
+                        user_feed.append(ScoredArticle(
+                            article_id=a.id,
+                            title=a.title,
+                            url=a.url,
+                            source=a.source,
+                            relevance_score=10.0,
+                            published_at=a.published_at,
+                            categories=a.categories,
+                            subcategories=a.subcategories,
+                        ))
+
+                # Sort chronologically, newest first
+                user_feed.sort(
+                    key=lambda x: x.published_at.timestamp() if x.published_at else 0,
+                    reverse=True,
                 )
 
-                if matched:
-                    user_feed.append(ScoredArticle(
-                        article_id=a.id,
-                        title=a.title,
-                        url=a.url,
-                        source=a.source,
-                        relevance_score=10.0,
-                        published_at=a.published_at,
-                        categories=a.categories,
-                        subcategories=a.subcategories,
-                    ))
+                # Cap at 1500 articles as requested to keep feed comprehensive without exceeding Firestore limits
+                user_feed = user_feed[:1500]
 
-            # Sort chronologically, newest first
-            user_feed.sort(
-                key=lambda x: x.published_at.timestamp() if x.published_at else 0,
-                reverse=True,
-            )
-
-            feed = UserFeed(
-                user_id=profile.user_id,
-                user_name=profile.name,
-                articles=user_feed,
-                generated_at=now,
-                article_count=len(user_feed),
-            )
-            await db.save_user_feed(feed)
+                feed = UserFeed(
+                    user_id=profile.user_id,
+                    user_name=profile.name,
+                    articles=user_feed,
+                    generated_at=now,
+                    article_count=len(user_feed),
+                )
+                await db.save_user_feed(feed)
+            except Exception as user_exc:
+                logger.error(f"[Scheduler] Failed building feed for user {profile.user_id}: {user_exc}")
+                continue
 
         logger.info(
             f"[Scheduler] Feed build done — "
