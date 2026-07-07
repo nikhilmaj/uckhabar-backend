@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     )
     ALLOWED_ORIGINS: List[str] = Field(
         default=[
+            "https://uckhabar.in",
+            "https://www.uckhabar.in",
             "https://uckhabar.web.app",
             "https://uckhabar.firebaseapp.com",
             "http://localhost:5500",
