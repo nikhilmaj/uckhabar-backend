@@ -261,6 +261,74 @@ async def feed_builder_job() -> None:
         logger.error(f"[Scheduler] Feed building failed: {exc}")
 
 
+async def build_feed_for_single_user(target_uid: str) -> None:
+    """Builds and saves a fresh feed immediately for a single user (e.g. after preference update)."""
+    logger.info(f"[FeedBuilder] Building immediate feed for user {target_uid}")
+    try:
+        profile = await db.get_user_profile(target_uid)
+        if not profile or profile.scoring_paused:
+            return
+
+        articles = await db.get_recent_articles(hours=120)
+        articles.sort(key=lambda a: a.published_at.timestamp() if a.published_at else 0, reverse=True)
+
+        seen_titles = set()
+        unique_articles = []
+        for a in articles:
+            clean_t = re.sub(r'[^a-zA-Z0-9]+', '', a.title).lower() if a.title else ""
+            if clean_t and clean_t not in seen_titles:
+                seen_titles.add(clean_t)
+                unique_articles.append(a)
+            elif not clean_t:
+                unique_articles.append(a)
+
+        user_feed = []
+        user_cats = set(profile.selected_categories)
+        user_subs = set()
+        for subs in profile.selected_subcategories.values():
+            for s in subs:
+                user_subs.add(s)
+
+        for a in unique_articles:
+            cf = profile.content_filters
+            act = a.content_type
+            if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
+            if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
+            if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
+            if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
+            if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
+
+            article_cats = set(a.categories)
+            article_subs = set(a.subcategories)
+            if bool(user_cats.intersection(article_cats) or user_subs.intersection(article_subs)):
+                user_feed.append(ScoredArticle(
+                    article_id=a.id,
+                    title=a.title,
+                    url=a.url,
+                    source=a.source,
+                    relevance_score=10.0,
+                    published_at=a.published_at,
+                    categories=a.categories,
+                    subcategories=a.subcategories,
+                ))
+
+        user_feed.sort(key=lambda x: x.published_at.timestamp() if x.published_at else 0, reverse=True)
+        user_feed = user_feed[:1000]
+
+        now = datetime.now(timezone.utc)
+        feed = UserFeed(
+            user_id=profile.user_id,
+            user_name=profile.name,
+            articles=user_feed,
+            generated_at=now,
+            article_count=len(user_feed),
+        )
+        await db.save_user_feed(feed)
+        logger.info(f"[FeedBuilder] Immediately rebuilt {len(user_feed)} articles for {target_uid}")
+    except Exception as exc:
+        logger.error(f"[FeedBuilder] Single user build failed for {target_uid}: {exc}")
+
+
 async def daily_cleanup_job() -> None:
     """Deletes articles older than 7 days from Firestore to control storage costs."""
     logger.info("[Scheduler] Daily cleanup job started")
@@ -526,7 +594,7 @@ async def complete_onboarding(
         f"Onboarding complete for {uid}: categories={request.selected_categories}"
     )
 
-    background_tasks.add_task(feed_builder_job)
+    background_tasks.add_task(build_feed_for_single_user, uid)
     return CompleteOnboardingResponse(status="processing", estimated_minutes=1)
 
 
