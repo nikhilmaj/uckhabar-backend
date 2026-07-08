@@ -505,7 +505,7 @@ async def refresh_my_feed(
     if profile.scoring_paused:
         await db.unpause_user(uid)
 
-    background_tasks.add_task(feed_builder_job)
+    background_tasks.add_task(build_feed_for_single_user, uid)
     return {"message": "Feed refresh triggered", "user_id": uid}
 
 
