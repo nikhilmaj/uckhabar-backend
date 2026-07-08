@@ -237,8 +237,11 @@ async def feed_builder_job() -> None:
                     reverse=True,
                 )
 
-                # Cap at 1000 articles to provide 4-5 days of comprehensive history across all selected topics
-                user_feed = user_feed[:1000]
+                # Rolling FIFO cap: if cap (1000) is hit, evict oldest articles to make space for newest ones
+                if len(user_feed) > 1000:
+                    evicted = len(user_feed) - 1000
+                    logger.info(f"[Scheduler] Cap reached for {profile.user_id}: evicting {evicted} oldest articles to keep newest 1000")
+                    user_feed = user_feed[:1000]
 
                 feed = UserFeed(
                     user_id=profile.user_id,
@@ -313,7 +316,10 @@ async def build_feed_for_single_user(target_uid: str) -> None:
                 ))
 
         user_feed.sort(key=lambda x: x.published_at.timestamp() if x.published_at else 0, reverse=True)
-        user_feed = user_feed[:1000]
+        if len(user_feed) > 1000:
+            evicted = len(user_feed) - 1000
+            logger.info(f"[FeedBuilder] Cap reached for {target_uid}: evicting {evicted} oldest articles to keep newest 1000")
+            user_feed = user_feed[:1000]
 
         now = datetime.now(timezone.utc)
         feed = UserFeed(
