@@ -128,6 +128,96 @@ async def rss_polling_job() -> None:
 
 
 
+CATEGORY_SYNONYMS = {
+    "AI": {"AI", "Technology", "Science & Research"},
+    "Technology": {"Technology", "AI", "Science & Research", "Video Gaming"},
+    "Finance": {"Finance", "Business & Industry", "Agriculture & Rural"},
+    "Politics": {"Politics", "Geopolitics", "International News", "Law & Justice", "Social Issues", "Defence & Military"},
+    "Entertainment": {"Entertainment", "Video Gaming"},
+    "Sports": {"Cricket", "Football", "Other Sports"},
+    "Environment": {"Environment & Climate", "Agriculture & Rural"},
+    "Health": {"Health & Medicine"},
+}
+
+def build_matched_feed_for_profile(articles, profile, min_articles=40):
+    user_feed = []
+    seen_ids = set()
+
+    sel_cats = getattr(profile, 'selected_categories', None) or []
+    expanded_cats = set(sel_cats)
+    for cat in sel_cats:
+        if cat in CATEGORY_SYNONYMS:
+            expanded_cats.update(CATEGORY_SYNONYMS[cat])
+
+    user_subs = set()
+    sel_subs = getattr(profile, 'selected_subcategories', None) or {}
+    for subs in sel_subs.values():
+        for s in (subs or []):
+            user_subs.add(s)
+
+    for a in articles:
+        cf = getattr(profile, 'content_filters', None) or {}
+        act = getattr(a, 'content_type', None) or {}
+        if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
+        if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
+        if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
+        if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
+        if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
+
+        article_cats = set(getattr(a, 'categories', None) or [])
+        article_subs = set(getattr(a, 'subcategories', None) or [])
+        matched = bool(
+            expanded_cats.intersection(article_cats) or
+            user_subs.intersection(article_subs)
+        )
+        if matched:
+            seen_ids.add(a.id)
+            user_feed.append(ScoredArticle(
+                article_id=a.id,
+                title=a.title or "",
+                url=a.url or "",
+                source=a.source or "UCKhabar",
+                relevance_score=10.0,
+                published_at=a.published_at,
+                categories=getattr(a, 'categories', None) or [],
+                subcategories=getattr(a, 'subcategories', None) or [],
+            ))
+
+    if len(user_feed) < min_articles:
+        for a in articles:
+            if len(user_feed) >= min_articles:
+                break
+            if a.id in seen_ids:
+                continue
+            cf = getattr(profile, 'content_filters', None) or {}
+            act = getattr(a, 'content_type', None) or {}
+            if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
+            if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
+            if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
+            if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
+            if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
+
+            seen_ids.add(a.id)
+            user_feed.append(ScoredArticle(
+                article_id=a.id,
+                title=a.title or "",
+                url=a.url or "",
+                source=a.source or "UCKhabar",
+                relevance_score=8.0,
+                published_at=a.published_at,
+                categories=getattr(a, 'categories', None) or [],
+                subcategories=getattr(a, 'subcategories', None) or [],
+            ))
+
+    user_feed.sort(
+        key=lambda x: x.published_at.timestamp() if x.published_at else 0,
+        reverse=True,
+    )
+    if len(user_feed) > 1000:
+        user_feed = user_feed[:1000]
+    return user_feed
+
+
 async def feed_builder_job() -> None:
     """Every 4 hours — match articles against user profiles using plain Python.
     Also handles inactive user management:
@@ -188,60 +278,8 @@ async def feed_builder_job() -> None:
                     skipped += 1
                     continue
 
-                # --- Feed Matching (No AI — pure Python keyword/category matching) ---
-                user_feed = []
-                user_cats = set(profile.selected_categories)
-
-                # Combine all selected subcategories into a single flat set
-                user_subs = set()
-                for subs in profile.selected_subcategories.values():
-                    for s in subs:
-                        user_subs.add(s)
-
-                for a in articles:
-                    # 1. Apply Content Filters
-                    cf = profile.content_filters
-                    act = a.content_type
-
-                    # If user disabled a filter and the article IS that type → reject it
-                    if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
-                    if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
-                    if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
-                    if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
-                    if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
-
-                    # 2. Category/Subcategory match
-                    article_cats = set(a.categories)
-                    article_subs = set(a.subcategories)
-
-                    matched = bool(
-                        user_cats.intersection(article_cats) or
-                        user_subs.intersection(article_subs)
-                    )
-
-                    if matched:
-                        user_feed.append(ScoredArticle(
-                            article_id=a.id,
-                            title=a.title,
-                            url=a.url,
-                            source=a.source,
-                            relevance_score=10.0,
-                            published_at=a.published_at,
-                            categories=a.categories,
-                            subcategories=a.subcategories,
-                        ))
-
-                # Sort chronologically, newest first
-                user_feed.sort(
-                    key=lambda x: x.published_at.timestamp() if x.published_at else 0,
-                    reverse=True,
-                )
-
-                # Rolling FIFO cap: if cap (1000) is hit, evict oldest articles to make space for newest ones
-                if len(user_feed) > 1000:
-                    evicted = len(user_feed) - 1000
-                    logger.info(f"[Scheduler] Cap reached for {profile.user_id}: evicting {evicted} oldest articles to keep newest 1000")
-                    user_feed = user_feed[:1000]
+                # --- Feed Matching (Expanded Synonyms + Minimum Feed Backfill) ---
+                user_feed = build_matched_feed_for_profile(articles, profile, min_articles=40)
 
                 feed = UserFeed(
                     user_id=profile.user_id,
@@ -285,41 +323,7 @@ async def build_feed_for_single_user(target_uid: str) -> None:
             elif not clean_t:
                 unique_articles.append(a)
 
-        user_feed = []
-        user_cats = set(profile.selected_categories)
-        user_subs = set()
-        for subs in profile.selected_subcategories.values():
-            for s in subs:
-                user_subs.add(s)
-
-        for a in unique_articles:
-            cf = profile.content_filters
-            act = a.content_type
-            if act.get("is_hard_news", False)  and not cf.get("is_hard_news", True):  continue
-            if act.get("is_editorial", False)  and not cf.get("is_editorial", True):  continue
-            if act.get("is_sponsored", False)  and not cf.get("is_sponsored", True):  continue
-            if act.get("is_explicit", False)   and not cf.get("is_explicit", True):   continue
-            if act.get("is_aggregated", False) and not cf.get("is_aggregated", True): continue
-
-            article_cats = set(a.categories)
-            article_subs = set(a.subcategories)
-            if bool(user_cats.intersection(article_cats) or user_subs.intersection(article_subs)):
-                user_feed.append(ScoredArticle(
-                    article_id=a.id,
-                    title=a.title,
-                    url=a.url,
-                    source=a.source,
-                    relevance_score=10.0,
-                    published_at=a.published_at,
-                    categories=a.categories,
-                    subcategories=a.subcategories,
-                ))
-
-        user_feed.sort(key=lambda x: x.published_at.timestamp() if x.published_at else 0, reverse=True)
-        if len(user_feed) > 1000:
-            evicted = len(user_feed) - 1000
-            logger.info(f"[FeedBuilder] Cap reached for {target_uid}: evicting {evicted} oldest articles to keep newest 1000")
-            user_feed = user_feed[:1000]
+        user_feed = build_matched_feed_for_profile(unique_articles, profile, min_articles=40)
 
         now = datetime.now(timezone.utc)
         feed = UserFeed(
