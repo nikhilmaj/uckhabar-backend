@@ -708,6 +708,17 @@ async def manual_scoring_run():
 
 
 @app.post(
+    "/admin/feed/rebuild/{uid}",
+    summary="Trigger immediate feed rebuild for a specific user ID",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
+async def rebuild_single_user_feed(uid: str):
+    await build_feed_for_single_user(uid)
+    return {"message": f"Successfully rebuilt feed for user {uid}"}
+
+
+@app.post(
     "/admin/cleanup/run",
     summary="Delete articles older than 7 days (admin only — called by Cloud Scheduler daily)",
     tags=["Admin"],
