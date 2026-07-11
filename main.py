@@ -459,7 +459,7 @@ async def get_discovery_feed():
     Public endpoint — no authentication required.
     Used on the waiting screen while a new user's personalised feed is built.
     """
-    articles = await db.get_recent_articles(hours=48)
+    articles = await db.get_recent_articles(hours=168)
     articles.sort(
         key=lambda a: a.published_at.timestamp() if a.published_at else 0,
         reverse=True,
@@ -477,16 +477,18 @@ async def get_discovery_feed():
         unique_articles,
         key=lambda a: a.published_at.timestamp() if a.published_at else 0,
         reverse=True,
-    )[:20]
+    )[:300]
     return {
         "articles": [
             {
-                "id":           a.id,
-                "title":        a.title,
-                "url":          a.url,
-                "source":       a.source,
-                "description":  (a.description or "")[:200],
-                "published_at": a.published_at.isoformat() if a.published_at else None,
+                "id":            a.id,
+                "title":         a.title,
+                "url":           a.url,
+                "source":        a.source,
+                "description":   (a.description or "")[:200],
+                "published_at":  a.published_at.isoformat() if a.published_at else None,
+                "categories":    a.categories or [],
+                "subcategories": a.subcategories or [],
             }
             for a in sorted_articles
         ],
@@ -728,6 +730,18 @@ async def manual_cleanup_run():
     """Delete articles older than 7 days from Firestore to control storage costs."""
     await daily_cleanup_job()
     return {"message": "Cleanup complete"}
+
+
+@app.get(
+    "/admin/analytics/summary",
+    summary="Get aggregated counts of all hitpoints and analytics events (admin only)",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
+async def analytics_summary():
+    """Fetch hitpoints breakdown from analytics_events in Firestore."""
+    summary = await db.get_analytics_summary()
+    return summary
 
 
 # ---------------------------------------------------------------------------

@@ -307,3 +307,15 @@ class DatabaseService:
         await feed_ref.delete()
         logger.info(f"[DB] Deleted feed for user {user_id} (profile kept)")
 
+    async def get_analytics_summary(self) -> dict:
+        """Aggregate hitpoint counts from analytics_events collection."""
+        docs = await self._db.collection("analytics_events").get()
+        total = 0
+        counts = {}
+        for d in docs:
+            total += 1
+            data = d.to_dict()
+            ev = data.get("event", "unknown")
+            counts[ev] = counts.get(ev, 0) + 1
+        return {"total_events": total, "event_counts": counts}
+
