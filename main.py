@@ -179,6 +179,7 @@ def build_matched_feed_for_profile(articles, profile, min_articles=40):
                 source=a.source or "UCKhabar",
                 relevance_score=10.0,
                 published_at=a.published_at,
+                is_breaking=getattr(a, 'is_breaking', False),
                 categories=getattr(a, 'categories', None) or [],
                 subcategories=getattr(a, 'subcategories', None) or [],
             ))
@@ -205,6 +206,7 @@ def build_matched_feed_for_profile(articles, profile, min_articles=40):
                 source=a.source or "UCKhabar",
                 relevance_score=8.0,
                 published_at=a.published_at,
+                is_breaking=getattr(a, 'is_breaking', False),
                 categories=getattr(a, 'categories', None) or [],
                 subcategories=getattr(a, 'subcategories', None) or [],
             ))

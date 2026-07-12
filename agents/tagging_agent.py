@@ -78,13 +78,13 @@ ARTICLES TO TAG:
 TAGGING RULES:
 1. categories: Array of strings. Must strictly be from this list: ["Geopolitics", "Finance", "AI", "Politics", "Technology", "Science & Research", "Health & Medicine", "Business & Industry", "Defence & Military", "Environment & Climate", "International News", "Law & Justice", "Social Issues", "Entertainment", "Cricket", "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"]. If none apply, use an empty array [].
 2. subcategories: Array of strings. Extract specific topics (e.g. "Indian Economy", "Rockstar Games", "Startups & VC", etc.). Be specific but concise. Max 3.
-3. content_type: Object with 6 exact boolean fields:
+3. is_breaking: Boolean. true ONLY if major live unfolding emergency, crisis, or urgent breaking news of high public impact.
+4. content_type: Object with 5 exact boolean fields:
    - "is_hard_news": true if factual reporting on events, false otherwise.
    - "is_editorial": true if opinion, analysis, or editorial.
    - "is_sponsored": true if promotional, PR, or sponsored content.
    - "is_explicit": true if contains graphic violence, crime, or sensitive mature content.
    - "is_aggregated": true if just a summary/roundup of other news.
-   - "is_breaking": true ONLY if major live unfolding emergency, crisis, or urgent breaking news of high public impact.
 
 Return ONLY a JSON array matching this exact schema for each article:
 [
@@ -92,13 +92,13 @@ Return ONLY a JSON array matching this exact schema for each article:
     "article_id": "...",
     "categories": ["Finance"],
     "subcategories": ["Indian Economy", "RBI"],
+    "is_breaking": false,
     "content_type": {{
       "is_hard_news": true,
       "is_editorial": false,
       "is_sponsored": false,
       "is_explicit": false,
-      "is_aggregated": false,
-      "is_breaking": false
+      "is_aggregated": false
     }}
   }},
   ...
@@ -190,6 +190,7 @@ class TaggingAgent:
             # Apply the tags to the original Article object
             original.categories = item.get("categories", [])
             original.subcategories = item.get("subcategories", [])
+            original.is_breaking = bool(item.get("is_breaking", False))
             
             ct = item.get("content_type", {})
             original.content_type = {
@@ -197,6 +198,5 @@ class TaggingAgent:
                 "is_editorial": bool(ct.get("is_editorial", False)),
                 "is_sponsored": bool(ct.get("is_sponsored", False)),
                 "is_explicit":  bool(ct.get("is_explicit", False)),
-                "is_aggregated": bool(ct.get("is_aggregated", False)),
-                "is_breaking":   bool(ct.get("is_breaking", False))
+                "is_aggregated": bool(ct.get("is_aggregated", False))
             }

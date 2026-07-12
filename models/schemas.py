@@ -101,6 +101,7 @@ class Article(BaseModel):
     
     # V2 Tagging Fields (populated by tagging agent)
     ai_tagged:     bool = False
+    is_breaking:   bool = False
     categories:    List[str] = Field(default_factory=list)
     subcategories: List[str] = Field(default_factory=list)
     content_type:  Dict[str, bool] = Field(default_factory=lambda: {
@@ -120,6 +121,7 @@ class ScoredArticle(BaseModel):
     source:           str
     relevance_score:  float   # 0-10; only articles >= 6 are kept in feeds
     published_at:     Optional[datetime] = None
+    is_breaking:      bool = False
     categories:       List[str] = Field(default_factory=list)
     subcategories:    List[str] = Field(default_factory=list)
 
