@@ -50,6 +50,14 @@ RSS_SOURCES: dict[str, str] = {
     "TOI Sports": "https://timesofindia.indiatimes.com/rssfeeds/4719148.cms",
     "Polygon":    "https://www.polygon.com/rss/index.xml",
     "GamesRadar": "https://www.gamesradar.com/rss/",
+    "ScienceDaily": "https://www.sciencedaily.com/rss/all.xml",
+    "ScienceDaily Tech": "https://www.sciencedaily.com/rss/top/technology.xml",
+    "Livemint Companies": "https://www.livemint.com/rss/companies",
+    "Livemint Markets": "https://www.livemint.com/rss/markets",
+    "Economic Times Markets": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "Economic Times Corporate": "https://economictimes.indiatimes.com/news/company/corporate-trends/rssfeeds/13358311.cms",
+    "Business Standard Companies": "https://www.business-standard.com/rss/companies-101.rss",
+    "Financial Express Industry": "https://www.financialexpress.com/business/industry/feed/",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source

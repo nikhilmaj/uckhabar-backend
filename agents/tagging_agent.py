@@ -77,6 +77,7 @@ ARTICLES TO TAG:
 
 TAGGING RULES:
 1. categories: Array of strings. Must strictly be from this list: ["Geopolitics", "Finance", "AI", "Politics", "Technology", "Science & Research", "Health & Medicine", "Business & Industry", "Defence & Military", "Environment & Climate", "International News", "Law & Justice", "Social Issues", "Entertainment", "Cricket", "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"]. If none apply, use an empty array [].
+   - CRITICAL RULE FOR "Business & Industry": Only apply "Business & Industry" to corporate news, company financial reports, startups, mergers & acquisitions, private sector manufacturing, corporate strategy, or commercial enterprises. Do NOT tag "Business & Industry" for municipal utilities (water boards, electricity distribution complaints), government civic infrastructure, railway/highway redevelopment by public authorities, or political party demands regarding civic projects.
 2. subcategories: Array of strings. Extract specific topics (e.g. "Indian Economy", "Rockstar Games", "Startups & VC", etc.). Be specific but concise. Max 3.
 3. is_breaking: Boolean. true ONLY if major live unfolding emergency, crisis, or urgent breaking news of high public impact.
 4. content_type: Object with 5 exact boolean fields:
