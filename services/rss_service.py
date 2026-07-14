@@ -58,6 +58,8 @@ RSS_SOURCES: dict[str, str] = {
     "Economic Times Corporate": "https://economictimes.indiatimes.com/news/company/corporate-trends/rssfeeds/13358311.cms",
     "Business Standard Companies": "https://www.business-standard.com/rss/companies-101.rss",
     "Financial Express Industry": "https://www.financialexpress.com/business/industry/feed/",
+    "Indian Express": "https://indianexpress.com/feed/",
+    "Indian Express Business": "https://indianexpress.com/section/business/feed/",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source
