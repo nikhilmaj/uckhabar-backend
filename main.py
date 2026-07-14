@@ -30,7 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Header, BackgroundTasks
+from fastapi import Depends, FastAPI, HTTPException, Header, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -47,6 +47,8 @@ from services.auth_service import get_current_user
 from services.db_service import DatabaseService
 from services.rss_service import fetch_all_feeds
 from services.topic_taxonomy import build_topics_from_selections
+from services.push_service import send_breaking_news_push, send_feed_ready_push, subscribe_token_to_topics
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -116,6 +118,9 @@ async def rss_polling_job() -> None:
             tagged = await tagging_agent.tag_articles(new_articles)
             saved = await db.save_articles(tagged)
             logger.info(f"[Scheduler] Saved {saved} newly tagged articles")
+            for art in tagged:
+                if getattr(art, 'is_breaking', False) or getattr(art, 'is_breaking_news', False):
+                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/")
 
         # For existing articles, just refresh fetched_at so they stay in recency window
         # WITHOUT overwriting their existing categories/subcategories tags
@@ -291,6 +296,10 @@ async def feed_builder_job() -> None:
                     article_count=len(user_feed),
                 )
                 await db.save_user_feed(feed)
+                if getattr(profile, 'push_tokens', None):
+                    ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
+                    tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
+                    await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
             except Exception as user_exc:
                 logger.error(f"[Scheduler] Failed building feed for user {profile.user_id}: {user_exc}")
                 continue
@@ -336,6 +345,8 @@ async def build_feed_for_single_user(target_uid: str) -> None:
             article_count=len(user_feed),
         )
         await db.save_user_feed(feed)
+        if getattr(profile, 'push_tokens', None):
+            await send_feed_ready_push(profile.push_tokens, time_of_day="curated")
         logger.info(f"[FeedBuilder] Immediately rebuilt {len(user_feed)} articles for {target_uid}")
     except Exception as exc:
         logger.error(f"[FeedBuilder] Single user build failed for {target_uid}: {exc}")
@@ -523,6 +534,31 @@ async def refresh_my_feed(
     return {"message": "Feed refresh triggered", "user_id": uid}
 
 
+class PushTokenRequest(BaseModel):
+    token: str
+
+@app.post(
+    "/notifications/subscribe",
+    summary="Subscribe device push token for background notifications",
+    tags=["Notifications"],
+)
+async def subscribe_push_token(req: PushTokenRequest, user=Depends(get_current_user)):
+    uid = user["uid"]
+    token = req.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+    profile = await db.get_user_profile(uid)
+    if profile:
+        tokens = set(getattr(profile, 'push_tokens', []) or [])
+        tokens.add(token)
+        profile.push_tokens = list(tokens)
+        await db.save_user_profile(profile)
+    else:
+        await db._db.collection("user_profiles").document(uid).set({"push_tokens": [token]}, merge=True)
+    await subscribe_token_to_topics(token, ["breaking_news"])
+    return {"status": "ok", "message": "Subscribed to background push notifications"}
+
+
 # ---------------------------------------------------------------------------
 # Onboarding  (auth required)
 # ---------------------------------------------------------------------------
@@ -645,15 +681,26 @@ async def get_my_profile(user=Depends(get_current_user)):
     summary="Update last_seen timestamp (called by frontend on each visit)",
     tags=["Feed"],
 )
-async def record_activity(user=Depends(get_current_user)):
+async def record_activity(request: Request, user=Depends(get_current_user)):
     """
     Lightweight endpoint called by the frontend on each page load.
     Updates the user's last_seen timestamp so the inactivity logic
     (7-day pause / 60-day cleanup) stays accurate without requiring
     the frontend to call the heavier /feed/me endpoint.
+    Also accepts optional { installed_app: bool } to track PWA installs.
     """
     uid = user["uid"]
     await db.update_last_seen(uid)
+
+    # Optionally update installed_app flag
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and "installed_app" in body:
+            ref = db._db.collection("user_profiles").document(uid)
+            await ref.set({"installed_app": body["installed_app"]}, merge=True)
+    except Exception:
+        pass  # No body or invalid JSON — that's fine
+
     return {"ok": True}
 
 

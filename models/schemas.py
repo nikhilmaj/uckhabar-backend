@@ -82,6 +82,7 @@ class UserProfile(BaseModel):
     last_login_city:         Optional[str] = None
     last_login_country:      Optional[str] = None
     scoring_paused:          bool = False
+    push_tokens:             List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
