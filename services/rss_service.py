@@ -60,6 +60,15 @@ RSS_SOURCES: dict[str, str] = {
     "Financial Express Industry": "https://www.financialexpress.com/business/industry/feed/",
     "Indian Express": "https://indianexpress.com/feed/",
     "Indian Express Business": "https://indianexpress.com/section/business/feed/",
+    "IDRW Defence": "https://idrw.org/feed/",
+    "Breaking Defense": "https://breakingdefense.com/feed",
+    "USNI Naval News": "https://news.usni.org/feed",
+    "ScienceDaily Health": "https://www.sciencedaily.com/rss/top/health.xml",
+    "Medical News Today": "https://www.medicalnewstoday.com/rss/featurednews.xml",
+    "MedPage Today": "https://www.medpagetoday.com/rss/headlines.xml",
+    "Hindu BusinessLine Agri": "https://www.thehindubusinessline.com/economy/agri-business/feeder/default.rss",
+    "Krishi Jagran": "https://krishijagran.com/feeds/rss",
+    "Down To Earth Agri": "https://www.downtoearth.org.in/rss/agriculture",
 }
 
 REQUEST_TIMEOUT  = 12.0   # seconds per source
