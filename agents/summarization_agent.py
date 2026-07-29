@@ -78,12 +78,18 @@ class SummarizationAgent:
                 )
             )
             raw_text = response.text.strip()
-            if raw_text.startswith("```json"):
-                raw_text = raw_text.split("```json")[1].rsplit("```", 1)[0].strip()
-            elif raw_text.startswith("```"):
-                raw_text = raw_text.split("```")[1].rsplit("```", 1)[0].strip()
+            
+            # Find JSON block purely by braces to ignore any markdown or intro text
+            start_idx = raw_text.find('{')
+            end_idx = raw_text.rfind('}')
+            
+            if start_idx != -1 and end_idx != -1 and end_idx >= start_idx:
+                json_str = raw_text[start_idx:end_idx+1]
+                return json.loads(json_str)
+            else:
+                logger.error(f"[SummarizationAgent] Could not find JSON braces in response: {raw_text}")
+                return None
                 
-            return json.loads(raw_text)
         except Exception as e:
-            logger.error(f"[SummarizationAgent] Failed to generate full story: {e}")
+            logger.error(f"[SummarizationAgent] Failed to generate full story. Exception: {e}")
             return None
