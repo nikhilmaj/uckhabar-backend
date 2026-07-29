@@ -307,11 +307,13 @@ async def feed_builder_job() -> None:
                 # --- Interval Summary ("While You Were Away") ---
                 ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
                 if 5 <= ist_hour < 12:
-                    window_label = "While you were asleep"
-                elif 12 <= ist_hour < 18:
-                    window_label = "While you were at work"
+                    window_label = "Good Morning, here is what happened overnight"
+                elif 12 <= ist_hour < 17:
+                    window_label = "Your Afternoon Khabar"
+                elif 17 <= ist_hour < 21:
+                    window_label = "Evening, Here is what happened"
                 else:
-                    window_label = "While you were away"
+                    window_label = "Before you sleep"
 
                 # Filter top recent articles for the summary (last 12 hours)
                 recent_articles_for_summary = [
@@ -381,11 +383,13 @@ async def build_feed_for_single_user(target_uid: str) -> None:
         # --- Interval Summary ("While You Were Away") ---
         ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
         if 5 <= ist_hour < 12:
-            window_label = "While you were asleep"
-        elif 12 <= ist_hour < 18:
-            window_label = "While you were at work"
+            window_label = "Good Morning, here is what happened overnight"
+        elif 12 <= ist_hour < 17:
+            window_label = "Your Afternoon Khabar"
+        elif 17 <= ist_hour < 21:
+            window_label = "Evening, Here is what happened"
         else:
-            window_label = "While you were away"
+            window_label = "Before you sleep"
 
         recent_articles_for_summary = [
             a for a in user_feed
