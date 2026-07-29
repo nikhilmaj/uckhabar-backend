@@ -23,10 +23,9 @@ async def subscribe_token_to_topics(token: str, topics: List[str] = ["breaking_n
         except Exception as e:
             logger.warning(f"[Push] Topic subscription failed for {topic}: {e}")
 
-async def send_breaking_news_push(title: str, article_id: str = "", url: str = "/") -> None:
+async def send_breaking_news_push(title: str, article_id: str = "", url: str = "/", topic: str = "breaking_news") -> None:
     """
-    Send breaking news push alert to the 'breaking_news' topic.
-    Per user requirement: DO NOT prefix with 'Breaking News: ...', just write the exact headline.
+    Send breaking news push alert to the specified FCM topic (defaults to 'breaking_news').
     """
     if not title:
         return
@@ -37,11 +36,11 @@ async def send_breaking_news_push(title: str, article_id: str = "", url: str = "
                 body=title
             ),
             data={
-                "tag": "breaking-news",
+                "tag": topic,
                 "article_id": str(article_id),
                 "url": str(url)
             },
-            topic="breaking_news"
+            topic=topic
         )
         response = messaging.send(message)
         logger.info(f"[Push] Sent breaking news broadcast: {response} (body: '{title}')")

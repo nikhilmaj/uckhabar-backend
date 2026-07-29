@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.tagging_agent import TaggingAgent
+from agents.summarization_agent import SummarizationAgent
 from config import settings
 from models.schemas import (
     CompleteOnboardingRequest,
@@ -68,6 +69,10 @@ tagging_agent = TaggingAgent(
     project_id=settings.GCP_PROJECT_ID,
     location=settings.GCP_REGION,
     model_name=settings.GEMINI_MODEL,
+)
+summarization_agent = SummarizationAgent(
+    project_id=settings.GCP_PROJECT_ID,
+    location=settings.GCP_REGION,
 )
 db = DatabaseService(project_id=settings.GCP_PROJECT_ID)
 # Scheduling is handled by Google Cloud Scheduler (external HTTP calls to /admin/* endpoints)
@@ -118,9 +123,18 @@ async def rss_polling_job() -> None:
             tagged = await tagging_agent.tag_articles(new_articles)
             saved = await db.save_articles(tagged)
             logger.info(f"[Scheduler] Saved {saved} newly tagged articles")
+            sent_breaking_titles = set()
             for art in tagged:
+                normalized = " ".join(art.title.lower().split()[:5])
+                if normalized in sent_breaking_titles:
+                    continue
+
                 if getattr(art, 'is_breaking', False) or getattr(art, 'is_breaking_news', False):
-                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/")
+                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="breaking_news")
+                    sent_breaking_titles.add(normalized)
+                elif getattr(art, 'is_globally_significant', False):
+                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="global_alerts")
+                    sent_breaking_titles.add(normalized)
 
         # For existing articles, just refresh fetched_at so they stay in recency window
         # WITHOUT overwriting their existing categories/subcategories tags
@@ -181,6 +195,7 @@ def build_matched_feed_for_profile(articles, profile, min_articles=40):
                 article_id=a.id,
                 title=a.title or "",
                 url=a.url or "",
+                image_url=a.image_url,
                 source=a.source or "UCKhabar",
                 relevance_score=10.0,
                 published_at=a.published_at,
@@ -208,6 +223,7 @@ def build_matched_feed_for_profile(articles, profile, min_articles=40):
                 article_id=a.id,
                 title=a.title or "",
                 url=a.url or "",
+                image_url=a.image_url,
                 source=a.source or "UCKhabar",
                 relevance_score=8.0,
                 published_at=a.published_at,
@@ -288,12 +304,36 @@ async def feed_builder_job() -> None:
                 # --- Feed Matching (Expanded Synonyms + Minimum Feed Backfill) ---
                 user_feed = build_matched_feed_for_profile(articles, profile, min_articles=40)
 
+                # --- Interval Summary ("While You Were Away") ---
+                ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
+                if 5 <= ist_hour < 12:
+                    window_label = "While you were asleep"
+                elif 12 <= ist_hour < 18:
+                    window_label = "While you were at work"
+                else:
+                    window_label = "While you were away"
+
+                # Filter top recent articles for the summary (last 12 hours)
+                recent_articles_for_summary = [
+                    a for a in user_feed
+                    if a.published_at and (now - a.published_at.replace(tzinfo=timezone.utc)).total_seconds() < 12 * 3600
+                ][:8]
+
+                interval_summary_text = None
+                if len(recent_articles_for_summary) >= 3:
+                    tone = getattr(profile, 'tone_preference', 'light') or 'light'
+                    interval_summary_text = await summarization_agent.generate_interval_summary(
+                        recent_articles_for_summary, tone
+                    )
+
                 feed = UserFeed(
                     user_id=profile.user_id,
                     user_name=profile.name,
                     articles=user_feed,
                     generated_at=now,
                     article_count=len(user_feed),
+                    interval_summary=interval_summary_text,
+                    interval_summary_window=window_label,
                 )
                 await db.save_user_feed(feed)
                 if getattr(profile, 'push_tokens', None):
@@ -337,12 +377,36 @@ async def build_feed_for_single_user(target_uid: str) -> None:
         user_feed = build_matched_feed_for_profile(unique_articles, profile, min_articles=40)
 
         now = datetime.now(timezone.utc)
+        
+        # --- Interval Summary ("While You Were Away") ---
+        ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
+        if 5 <= ist_hour < 12:
+            window_label = "While you were asleep"
+        elif 12 <= ist_hour < 18:
+            window_label = "While you were at work"
+        else:
+            window_label = "While you were away"
+
+        recent_articles_for_summary = [
+            a for a in user_feed
+            if a.published_at and (now - a.published_at.replace(tzinfo=timezone.utc)).total_seconds() < 12 * 3600
+        ][:8]
+
+        interval_summary_text = None
+        if len(recent_articles_for_summary) >= 3:
+            tone = getattr(profile, 'tone_preference', 'light') or 'light'
+            interval_summary_text = await summarization_agent.generate_interval_summary(
+                recent_articles_for_summary, tone
+            )
+
         feed = UserFeed(
             user_id=profile.user_id,
             user_name=profile.name,
             articles=user_feed,
             generated_at=now,
             article_count=len(user_feed),
+            interval_summary=interval_summary_text,
+            interval_summary_window=window_label,
         )
         await db.save_user_feed(feed)
         if getattr(profile, 'push_tokens', None):
@@ -462,6 +526,38 @@ async def get_my_feed(
 
 
 @app.get(
+    "/api/article/{article_id}/full-story",
+    summary="Fetch the full backstory of an article using AI search grounding",
+    tags=["Feed"],
+)
+async def get_full_story_endpoint(article_id: str, user=Depends(get_current_user)):
+    """
+    Fetches the article from Firestore by ID.
+    If the 'Full Story' context is already cached, it returns it instantly.
+    Otherwise, calls the SummarizationAgent to build the context (with Google Search) and saves it to Firestore.
+    """
+    article = await db.get_article(article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # Return cached story if available
+    if article.full_story:
+        return article.full_story
+    
+    # Otherwise generate it (costs API tokens)
+    snippet = article.description or ""
+    full_story = await summarization_agent.get_full_story(article.title, article.source, snippet)
+    if not full_story:
+        raise HTTPException(status_code=500, detail="Failed to generate full story context.")
+    
+    # Save back to database to cache it
+    await db.update_article_full_story(article_id, full_story)
+    
+    return full_story
+
+
+
+@app.get(
     "/feed/discovery",
     summary="Public discovery feed — top recent articles, no auth required",
     tags=["Feed"],
@@ -555,7 +651,12 @@ async def subscribe_push_token(req: PushTokenRequest, user=Depends(get_current_u
         await db.save_user_profile(profile)
     else:
         await db._db.collection("user_profiles").document(uid).set({"push_tokens": [token]}, merge=True)
-    await subscribe_token_to_topics(token, ["breaking_news"])
+    
+    topics = ["breaking_news"]
+    if profile and getattr(profile, 'global_alerts_enabled', False):
+        topics.append("global_alerts")
+        
+    await subscribe_token_to_topics(token, topics)
     return {"status": "ok", "message": "Subscribed to background push notifications"}
 
 
@@ -627,6 +728,8 @@ async def complete_onboarding(
         topics=topics,
         selected_categories=request.selected_categories,
         selected_subcategories=request.selected_subcategories,
+        tone_preference=request.tone_preference,
+        global_alerts_enabled=request.global_alerts_enabled,
         ai_extras=request.ai_extras,
         ai_extras_keywords=ai_keywords,
         content_filters=request.content_filters,

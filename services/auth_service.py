@@ -44,8 +44,8 @@ def _init_firebase() -> None:
     if firebase_admin._apps:
         return   # already initialised
 
-    import os
-    project_id = os.environ.get("GCP_PROJECT_ID")
+    from config import settings
+    project_id = settings.GCP_PROJECT_ID
 
     try:
         cred = credentials.ApplicationDefault()

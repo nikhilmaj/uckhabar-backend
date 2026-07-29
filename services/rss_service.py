@@ -125,6 +125,27 @@ def _extract_category(entry: dict) -> Optional[str]:
         return tags[0].get("term") or tags[0].get("label")
     return None
 
+def _extract_image_url(entry: dict) -> Optional[str]:
+    """Attempt to extract an image URL from RSS entry media or enclosures."""
+    if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
+        url = entry.media_thumbnail[0].get('url')
+        if url: return url
+    if 'media_content' in entry and len(entry.media_content) > 0:
+        for media in entry.media_content:
+            if media.get('medium') == 'image' or 'image' in media.get('type', ''):
+                url = media.get('url')
+                if url: return url
+    if 'enclosures' in entry and len(entry.enclosures) > 0:
+        for enc in entry.enclosures:
+            if 'image' in enc.get('type', ''):
+                url = enc.get('href')
+                if url: return url
+    summary = entry.get('summary', '') or entry.get('description', '')
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', summary, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Single-source fetcher
@@ -173,6 +194,7 @@ async def fetch_rss_feed(source_name: str, feed_url: str) -> List[Article]:
                 title=title,
                 description=description if description else None,
                 url=url,
+                image_url=_extract_image_url(entry),
                 source=source_name,
                 category=_extract_category(entry),
                 published_at=published_at,

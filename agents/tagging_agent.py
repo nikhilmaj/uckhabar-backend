@@ -43,6 +43,8 @@ class ArticleTag(BaseModel):
     categories: List[CategoryEnum]
     subcategories: List[str]
     content_type: ContentTypeTag
+    is_breaking: bool = False
+    is_globally_significant: bool = False
 
 
 logger = logging.getLogger("uckhabar.tagging")
@@ -79,8 +81,17 @@ TAGGING RULES:
 1. categories: Array of strings. Must strictly be from this list: ["Geopolitics", "Finance", "AI", "Politics", "Technology", "Science & Research", "Health & Medicine", "Business & Industry", "Defence & Military", "Environment & Climate", "International News", "Law & Justice", "Social Issues", "Entertainment", "Cricket", "Football", "Other Sports", "Video Gaming", "Automotive", "Agriculture & Rural"]. If none apply, use an empty array [].
    - CRITICAL RULE FOR "Business & Industry": Only apply "Business & Industry" to corporate news, company financial reports, startups, mergers & acquisitions, private sector manufacturing, corporate strategy, or commercial enterprises. Do NOT tag "Business & Industry" for municipal utilities (water boards, electricity distribution complaints), government civic infrastructure, railway/highway redevelopment by public authorities, or political party demands regarding civic projects.
 2. subcategories: Array of strings. Extract specific topics (e.g. "Indian Economy", "Rockstar Games", "Startups & VC", etc.). Be specific but concise. Max 3.
-3. is_breaking: Boolean. true ONLY if major live unfolding emergency, crisis, or urgent breaking news of high public impact.
-4. content_type: Object with 5 exact boolean fields:
+3. is_breaking: Boolean. true ONLY for genuine national or international emergencies of very high public impact — e.g. a war declaration, a major terror attack, a sitting head-of-state dying, a catastrophic natural disaster, a major financial market collapse, or a historic election result.
+   STRICT EXCLUSIONS for is_breaking (always false for these):
+   - Any sports play-by-play: wickets taken, goals scored, match scores, innings updates, player statistics
+   - Any sports match starting, ending, or a team winning a series/tournament (unless it is a historic World Cup final moment of truly national significance AND no other article about the same match has already been flagged breaking)
+   - Press conferences, previews, squad announcements, transfer rumours
+   - Stock market routine updates, company earnings, product launches
+   - Celebrity news, award shows, box office results
+   - Opinion pieces, editorials, analysis articles
+   - Any article that is clearly a follow-up or update to an already-known ongoing story (e.g. day-3 of an ongoing war)
+4. is_globally_significant: Boolean. true if this story is a major world event that every person regardless of their interests should know about — even if it is NOT breaking in the emergency sense. Examples: a war escalating significantly, a major earthquake killing hundreds, a landmark international agreement, a historic scientific discovery. Routine political news, cricket scores, market movements are NOT globally significant.
+5. content_type: Object with 5 exact boolean fields:
    - "is_hard_news": true if factual reporting on events, false otherwise.
    - "is_editorial": true if opinion, analysis, or editorial.
    - "is_sponsored": true if promotional, PR, or sponsored content.
@@ -94,6 +105,7 @@ Return ONLY a JSON array matching this exact schema for each article:
     "categories": ["Finance"],
     "subcategories": ["Indian Economy", "RBI"],
     "is_breaking": false,
+    "is_globally_significant": false,
     "content_type": {{
       "is_hard_news": true,
       "is_editorial": false,
@@ -192,6 +204,7 @@ class TaggingAgent:
             original.categories = item.get("categories", [])
             original.subcategories = item.get("subcategories", [])
             original.is_breaking = bool(item.get("is_breaking", False))
+            original.is_globally_significant = bool(item.get("is_globally_significant", False))
             
             ct = item.get("content_type", {})
             original.content_type = {

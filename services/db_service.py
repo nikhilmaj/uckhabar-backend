@@ -134,6 +134,19 @@ class DatabaseService:
         logger.debug(f"[DB] Refreshed fetched_at for {count} existing articles")
 
 
+    async def get_article(self, article_id: str) -> Optional[Article]:
+        """Fetch a specific article by ID."""
+        doc = await self._db.collection("articles").document(article_id).get()
+        if doc.exists:
+            return Article(**doc.to_dict())
+        return None
+
+    async def update_article_full_story(self, article_id: str, full_story: dict) -> None:
+        """Cache the AI-generated full story for an article."""
+        await self._db.collection("articles").document(article_id).update({
+            "full_story": full_story
+        })
+
     async def get_recent_articles(self, hours: int = 24) -> List[Article]:
         """
         Return all articles fetched within the last `hours` hours AND
