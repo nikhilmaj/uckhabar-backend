@@ -77,7 +77,13 @@ class SummarizationAgent:
                     temperature=0.3
                 )
             )
-            return json.loads(response.text)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text.split("```json")[1].rsplit("```", 1)[0].strip()
+            elif raw_text.startswith("```"):
+                raw_text = raw_text.split("```")[1].rsplit("```", 1)[0].strip()
+                
+            return json.loads(raw_text)
         except Exception as e:
             logger.error(f"[SummarizationAgent] Failed to generate full story: {e}")
             return None
