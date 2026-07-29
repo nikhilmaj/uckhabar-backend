@@ -13,7 +13,7 @@ correctly even after the v2 migration.
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Literal
+from typing import List, Optional, Dict, Literal, Any
 from datetime import datetime
 from enum import Enum
 
