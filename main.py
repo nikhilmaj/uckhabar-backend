@@ -534,7 +534,7 @@ async def get_my_feed(
     summary="Fetch the full backstory of an article using AI search grounding",
     tags=["Feed"],
 )
-async def get_full_story_endpoint(article_id: str, user=Depends(get_current_user)):
+async def get_full_story_endpoint(article_id: str):
     """
     Fetches the article from Firestore by ID.
     If the 'Full Story' context is already cached, it returns it instantly.
