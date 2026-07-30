@@ -23,8 +23,7 @@ class SummarizationAgent:
 
         payload = ""
         for a in articles:
-            snippet = (a.description or "")[:200]
-            payload += f"- Title: {a.title}\n  Source: {a.source}\n  Snippet: {snippet}\n\n"
+            payload += f"- Title: {a.title}\n  Source: {a.source}\n\n"
 
         tone = (tone or "").lower()
         if tone == "formal":
