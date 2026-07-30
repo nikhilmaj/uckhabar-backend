@@ -315,18 +315,29 @@ async def feed_builder_job() -> None:
                 else:
                     window_label = "The Nightly Digest"
 
-                # Filter top recent articles for the summary (last 12 hours)
-                recent_articles_for_summary = [
-                    a for a in user_feed
-                    if a.published_at and (now - a.published_at.replace(tzinfo=timezone.utc)).total_seconds() < 12 * 3600
-                ][:8]
-
                 interval_summary_text = None
-                if len(recent_articles_for_summary) >= 3:
-                    tone = getattr(profile, 'tone_preference', 'light') or 'light'
-                    interval_summary_text = await summarization_agent.generate_interval_summary(
-                        recent_articles_for_summary, tone
-                    )
+                
+                # Check if this is a trigger interval (8am, 12pm, 5pm, 9pm) and first run of the hour
+                TRIGGER_HOURS_IST = [8, 12, 17, 21]
+                is_trigger_hour = (ist_hour in TRIGGER_HOURS_IST) and (now.minute < 30)
+
+                if is_trigger_hour:
+                    # Filter top recent articles for the summary (last 12 hours)
+                    recent_articles_for_summary = [
+                        a for a in user_feed
+                        if a.published_at and (now - a.published_at.replace(tzinfo=timezone.utc)).total_seconds() < 12 * 3600
+                    ][:8]
+
+                    if len(recent_articles_for_summary) >= 3:
+                        tone = getattr(profile, 'tone_preference', 'light') or 'light'
+                        interval_summary_text = await summarization_agent.generate_interval_summary(
+                            recent_articles_for_summary, tone
+                        )
+                else:
+                    # Not a trigger hour, try to carry over the existing summary if it matches the current window
+                    existing_feed = await db.get_user_feed(profile.user_id)
+                    if existing_feed and getattr(existing_feed, 'interval_summary_window', None) == window_label:
+                        interval_summary_text = getattr(existing_feed, 'interval_summary', None)
 
                 feed = UserFeed(
                     user_id=profile.user_id,
@@ -338,8 +349,8 @@ async def feed_builder_job() -> None:
                     interval_summary_window=window_label,
                 )
                 await db.save_user_feed(feed)
-                if getattr(profile, 'push_tokens', None):
-                    ist_hour = (now.hour + 5 + (1 if (now.minute + 30) >= 60 else 0)) % 24
+
+                if getattr(profile, 'push_tokens', None) and is_trigger_hour:
                     tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
                     await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
             except Exception as user_exc:
@@ -874,6 +885,23 @@ async def manual_scoring_run():
 async def rebuild_single_user_feed(uid: str):
     await build_feed_for_single_user(uid)
     return {"message": f"Successfully rebuilt feed for user {uid}"}
+
+
+@app.post(
+    "/admin/test/push/{uid}",
+    summary="Trigger a test push notification for a specific user ID",
+    tags=["Admin"],
+    dependencies=[Depends(verify_admin)],
+)
+async def test_push_for_single_user(uid: str):
+    profile = await db.get_user_profile(uid)
+    if not profile:
+        return {"error": "User not found"}
+    if getattr(profile, 'push_tokens', None) is None or len(profile.push_tokens) == 0:
+        return {"error": "User has no push tokens registered"}
+    
+    await send_feed_ready_push(profile.push_tokens, time_of_day="test")
+    return {"message": f"Successfully sent test push to user {uid}"}
 
 
 @app.post(
