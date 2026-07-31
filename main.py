@@ -894,14 +894,30 @@ async def rebuild_single_user_feed(uid: str):
     dependencies=[Depends(verify_admin)],
 )
 async def test_push_for_single_user(uid: str):
+    from firebase_admin import messaging as fcm_messaging
     profile = await db.get_user_profile(uid)
     if not profile:
         return {"error": "User not found"}
     if getattr(profile, 'push_tokens', None) is None or len(profile.push_tokens) == 0:
         return {"error": "User has no push tokens registered"}
     
-    await send_feed_ready_push(profile.push_tokens, time_of_day="test")
-    return {"message": f"Successfully sent test push to user {uid}"}
+    results = []
+    for token in profile.push_tokens:
+        try:
+            msg = fcm_messaging.Message(
+                notification=fcm_messaging.Notification(
+                    title="UCKhabar Test",
+                    body="This is a test notification. If you see this, push is working!"
+                ),
+                data={"tag": "test-push", "url": "/"},
+                token=token
+            )
+            resp = fcm_messaging.send(msg)
+            results.append({"token": token[:20] + "...", "status": "success", "response": str(resp)})
+        except Exception as e:
+            results.append({"token": token[:20] + "...", "status": "failed", "error": str(e)})
+    
+    return {"message": f"Push test for {uid}", "token_count": len(profile.push_tokens), "results": results}
 
 
 @app.post(
