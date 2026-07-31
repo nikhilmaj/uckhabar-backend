@@ -557,7 +557,10 @@ async def get_full_story_endpoint(article_id: str):
     
     # Return cached story if available
     if article.full_story:
-        return article.full_story
+        cached_story = dict(article.full_story)
+        if "image_url" not in cached_story and getattr(article, "image_url", None):
+            cached_story["image_url"] = article.image_url
+        return cached_story
     
     # Otherwise generate it (costs API tokens)
     snippet = article.description or ""
@@ -565,23 +568,27 @@ async def get_full_story_endpoint(article_id: str):
     if not full_story:
         raise HTTPException(status_code=500, detail="Failed to generate full story context.")
     
-    # Try to fetch Wikipedia image for the main entity
-    search_term = full_story.get("main_entity_wikipedia_search_term")
-    if search_term:
-        import urllib.parse
-        wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles={urllib.parse.quote(search_term)}"
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                res = await client.get(wiki_url)
-                if res.status_code == 200:
-                    data = res.json()
-                    pages = data.get("query", {}).get("pages", {})
-                    for k, v in pages.items():
-                        if "original" in v and "source" in v["original"]:
-                            full_story["image_url"] = v["original"]["source"]
-                            break
-        except Exception as e:
-            logging.getLogger("uckhabar.feed").warning(f"Failed to fetch wikipedia image: {e}")
+    # Prioritize the original article thumbnail
+    if getattr(article, "image_url", None):
+        full_story["image_url"] = article.image_url
+    else:
+        # Try to fetch Wikipedia image for the main entity
+        search_term = full_story.get("main_entity_wikipedia_search_term")
+        if search_term:
+            import urllib.parse
+            wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&pithumbsize=800&titles={urllib.parse.quote(search_term)}"
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    res = await client.get(wiki_url)
+                    if res.status_code == 200:
+                        data = res.json()
+                        pages = data.get("query", {}).get("pages", {})
+                        for k, v in pages.items():
+                            if "thumbnail" in v and "source" in v["thumbnail"]:
+                                full_story["image_url"] = v["thumbnail"]["source"]
+                                break
+            except Exception as e:
+                logging.getLogger("uckhabar.feed").warning(f"Failed to fetch wikipedia image: {e}")
     
     # Save back to database to cache it
     await db.update_article_full_story(article_id, full_story)
