@@ -565,6 +565,24 @@ async def get_full_story_endpoint(article_id: str):
     if not full_story:
         raise HTTPException(status_code=500, detail="Failed to generate full story context.")
     
+    # Try to fetch Wikipedia image for the main entity
+    search_term = full_story.get("main_entity_wikipedia_search_term")
+    if search_term:
+        import urllib.parse
+        wiki_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=pageimages&format=json&piprop=original&titles={urllib.parse.quote(search_term)}"
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                res = await client.get(wiki_url)
+                if res.status_code == 200:
+                    data = res.json()
+                    pages = data.get("query", {}).get("pages", {})
+                    for k, v in pages.items():
+                        if "original" in v and "source" in v["original"]:
+                            full_story["image_url"] = v["original"]["source"]
+                            break
+        except Exception as e:
+            logging.getLogger("uckhabar.feed").warning(f"Failed to fetch wikipedia image: {e}")
+    
     # Save back to database to cache it
     await db.update_article_full_story(article_id, full_story)
     

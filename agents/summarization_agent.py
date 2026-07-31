@@ -61,7 +61,8 @@ class SummarizationAgent:
             '  "current_status": "1-line summary of what is happening now (based on the snippet)",\n'
             '  "story_so_far": "2-3 sentences explaining the origins, key players, and backstory",\n'
             '  "why_it_matters": "1-sentence explaining why this is significant",\n'
-            '  "timeline": ["Chronological event 1", "Chronological event 2", "Chronological event 3"]\n'
+            '  "timeline": ["Chronological event 1", "Chronological event 2", "Chronological event 3"],\n'
+            '  "main_entity_wikipedia_search_term": "Exact name of the primary subject for a Wikipedia search (e.g. \'Roger Federer\', \'Nvidia\', \'India\'), or empty string if none."\n'
             "}"
         )
         prompt = f"Headline: {article_title}\nSource: {article_source}\nSnippet: {article_snippet}\n\nPlease generate the full story context and return the requested JSON."
