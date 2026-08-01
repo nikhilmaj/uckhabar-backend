@@ -123,18 +123,22 @@ async def rss_polling_job() -> None:
             tagged = await tagging_agent.tag_articles(new_articles)
             saved = await db.save_articles(tagged)
             logger.info(f"[Scheduler] Saved {saved} newly tagged articles")
-            sent_breaking_titles = set()
-            for art in tagged:
-                normalized = " ".join(art.title.lower().split()[:5])
-                if normalized in sent_breaking_titles:
-                    continue
-
-                if getattr(art, 'is_breaking', False) or getattr(art, 'is_breaking_news', False):
-                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="breaking_news")
-                    sent_breaking_titles.add(normalized)
-                elif getattr(art, 'is_globally_significant', False):
-                    await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="global_alerts")
-                    sent_breaking_titles.add(normalized)
+            
+            global _LAST_PUSH_TIME
+            if '_LAST_PUSH_TIME' not in globals():
+                _LAST_PUSH_TIME = datetime.min
+                
+            now = datetime.utcnow()
+            if (now - _LAST_PUSH_TIME).total_seconds() > (3600 * 4):
+                for art in tagged:
+                    if getattr(art, 'is_breaking', False) or getattr(art, 'is_breaking_news', False):
+                        await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="breaking_news")
+                        _LAST_PUSH_TIME = now
+                        break
+                    elif getattr(art, 'is_globally_significant', False):
+                        await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="global_alerts")
+                        _LAST_PUSH_TIME = now
+                        break
 
         # For existing articles, just refresh fetched_at so they stay in recency window
         # WITHOUT overwriting their existing categories/subcategories tags
