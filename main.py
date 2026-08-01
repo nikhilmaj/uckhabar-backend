@@ -48,7 +48,7 @@ from services.auth_service import get_current_user
 from services.db_service import DatabaseService
 from services.rss_service import fetch_all_feeds
 from services.topic_taxonomy import build_topics_from_selections
-from services.push_service import send_breaking_news_push, send_feed_ready_push, subscribe_token_to_topics
+from services.push_service import send_breaking_news_push, send_feed_ready_push, subscribe_token_to_topics, send_personalized_push
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ async def rss_polling_job() -> None:
                 _LAST_PUSH_TIME = datetime.min
                 
             now = datetime.utcnow()
-            if (now - _LAST_PUSH_TIME).total_seconds() > (3600 * 4):
+            if (now - _LAST_PUSH_TIME).total_seconds() > (3600 * 3):
                 for art in tagged:
                     if getattr(art, 'is_breaking', False) or getattr(art, 'is_breaking_news', False):
                         await send_breaking_news_push(title=art.title, article_id=art.id, url=art.url or "/", topic="breaking_news")
@@ -354,9 +354,28 @@ async def feed_builder_job() -> None:
                 )
                 await db.save_user_feed(feed)
 
-                if getattr(profile, 'push_tokens', None) and is_trigger_hour:
-                    tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
-                    await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
+                if getattr(profile, 'push_tokens', None):
+                    if is_trigger_hour:
+                        tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
+                        await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
+                    else:
+                        # Try to send a personalized trendy push (max 1 every 1.5 hours)
+                        last_trendy = getattr(profile, 'last_trendy_push', None)
+                        last_trendy_dt = last_trendy.replace(tzinfo=timezone.utc) if last_trendy else datetime.min.replace(tzinfo=timezone.utc)
+                        if (now - last_trendy_dt).total_seconds() >= (1.5 * 3600):
+                            pushed_ids = set(getattr(profile, 'pushed_article_ids', []) or [])
+                            trendy_art = None
+                            for art in user_feed:
+                                if art.id not in pushed_ids:
+                                    trendy_art = art
+                                    break
+                            
+                            if trendy_art:
+                                await send_personalized_push(profile.push_tokens, title=trendy_art.title, article_id=trendy_art.id, url=trendy_art.url or "/")
+                                profile.last_trendy_push = now
+                                pushed_ids.add(trendy_art.id)
+                                profile.pushed_article_ids = list(pushed_ids)[-100:] # Keep last 100
+                                await db.save_user_profile(profile)
             except Exception as user_exc:
                 logger.error(f"[Scheduler] Failed building feed for user {profile.user_id}: {user_exc}")
                 continue

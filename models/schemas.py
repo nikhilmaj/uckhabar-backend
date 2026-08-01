@@ -66,6 +66,9 @@ class UserProfile(BaseModel):
     global_alerts_enabled:   bool = True
     ai_extras:               Optional[str] = None
     ai_extras_keywords:      List[str] = Field(default_factory=list)
+    # Push tracking
+    last_trendy_push:        Optional[datetime] = None
+    pushed_article_ids:      List[str] = Field(default_factory=list)
     # V2 Content Filters
     content_filters:         Dict[str, bool] = Field(default_factory=lambda: {
         "is_hard_news": True,

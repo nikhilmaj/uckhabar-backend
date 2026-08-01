@@ -46,6 +46,31 @@ async def send_breaking_news_push(title: str, article_id: str = "", url: str = "
         logger.info(f"[Push] Sent breaking news broadcast: {response} (body: '{title}')")
     except Exception as e:
         logger.error(f"[Push] Failed to send breaking news push: {e}")
+async def send_personalized_push(tokens: List[str], title: str, article_id: str, url: str) -> None:
+    """Send a specific article alert directly to a user's tokens (e.g. Trendy News)."""
+    if not tokens or not title:
+        return
+    messages = []
+    for token in tokens:
+        messages.append(
+            messaging.Message(
+                notification=messaging.Notification(
+                    title="Trending For You",
+                    body=title
+                ),
+                data={
+                    "tag": "trendy",
+                    "article_id": str(article_id),
+                    "url": str(url)
+                },
+                token=token
+            )
+        )
+    try:
+        response = messaging.send_each(messages)
+        logger.info(f"[Push] Sent personalized pushes: {response.success_count} success")
+    except Exception as e:
+        logger.error(f"[Push] Failed to send personalized push: {e}")
 
 async def send_feed_ready_push(tokens: List[str], time_of_day: str = "curated") -> None:
     """
