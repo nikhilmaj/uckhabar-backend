@@ -23,6 +23,17 @@ async def subscribe_token_to_topics(token: str, topics: List[str] = ["breaking_n
         except Exception as e:
             logger.warning(f"[Push] Topic subscription failed for {topic}: {e}")
 
+async def unsubscribe_token_from_topics(token: str, topics: List[str]) -> None:
+    """Unsubscribe a web push FCM token from FCM topics."""
+    if not token:
+        return
+    for topic in topics:
+        try:
+            response = messaging.unsubscribe_from_topic([token], topic)
+            logger.info(f"[Push] Unsubscribed token from topic {topic}: {response.success_count} success")
+        except Exception as e:
+            logger.warning(f"[Push] Topic unsubscription failed for {topic}: {e}")
+
 async def send_breaking_news_push(title: str, article_id: str = "", url: str = "/", topic: str = "breaking_news") -> None:
     """
     Send breaking news push alert to the specified FCM topic (defaults to 'breaking_news').

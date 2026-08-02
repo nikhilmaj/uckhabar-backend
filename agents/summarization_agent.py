@@ -26,13 +26,17 @@ class SummarizationAgent:
             payload += f"- Title: {a.title}\n  Source: {a.source}\n\n"
 
         tone = (tone or "").lower()
-        if tone == "formal":
+        if tone == "professional" or tone == "formal":
             sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences."
         elif tone == "humorous":
             sys_instruct = "You are a witty late-night talk show host. Give a clever, punchy summary of the news, including a lighthearted joke or pun if appropriate. Keep it to 3-5 sentences."
+        elif tone == "sarcastic":
+            sys_instruct = "You are a highly sarcastic, dry, and slightly cynical news commentator. Give a factual but biting summary of the news. Keep it to 3-5 sentences."
+        elif tone == "gen z" or tone == "gen_z":
+            sys_instruct = "You are a Gen Z news commentator. Explain the news using modern internet slang (e.g., no cap, fr, based, giving) but keep the facts perfectly accurate. Keep it to 3-5 sentences."
         elif tone == "bullets":
             sys_instruct = "You are a busy executive assistant. Provide a concise, bulleted list of the top highlights. No introductory text, just the bullet points. Maximum 4 bullets."
-        else: # "light" or default
+        else: # "casual" or "light" or default
             sys_instruct = "You are a friendly, conversational companion. Catch the reader up on the news in a casual, easy-going tone. Keep it to 3-5 sentences."
 
         prompt = f"Here are the top news articles from the recent interval. Please summarize them according to your persona.\n\nARTICLES:\n{payload}"

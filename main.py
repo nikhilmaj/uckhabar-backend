@@ -43,12 +43,13 @@ from models.schemas import (
     UserFeed,
     UserProfile,
     ScoredArticle,
+    UpdateProfileRequest,
 )
 from services.auth_service import get_current_user
 from services.db_service import DatabaseService
 from services.rss_service import fetch_all_feeds
 from services.topic_taxonomy import build_topics_from_selections
-from services.push_service import send_breaking_news_push, send_feed_ready_push, subscribe_token_to_topics, send_personalized_push
+from services.push_service import send_breaking_news_push, send_feed_ready_push, subscribe_token_to_topics, send_personalized_push, unsubscribe_token_from_topics
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -356,9 +357,10 @@ async def feed_builder_job() -> None:
 
                 if getattr(profile, 'push_tokens', None):
                     if is_trigger_hour:
-                        tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
-                        await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
-                    else:
+                        if getattr(profile, 'summary_alerts_enabled', True):
+                            tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
+                            await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
+                    elif getattr(profile, 'trendy_alerts_enabled', True):
                         # Try to send a personalized trendy push (max 1 every 1.5 hours)
                         last_trendy = getattr(profile, 'last_trendy_push', None)
                         last_trendy_dt = last_trendy.replace(tzinfo=timezone.utc) if last_trendy else datetime.min.replace(tzinfo=timezone.utc)
@@ -447,7 +449,7 @@ async def build_feed_for_single_user(target_uid: str) -> None:
             interval_summary_window=window_label,
         )
         await db.save_user_feed(feed)
-        if getattr(profile, 'push_tokens', None):
+        if getattr(profile, 'push_tokens', None) and getattr(profile, 'summary_alerts_enabled', True):
             await send_feed_ready_push(profile.push_tokens, time_of_day="curated")
         logger.info(f"[FeedBuilder] Immediately rebuilt {len(user_feed)} articles for {target_uid}")
     except Exception as exc:
@@ -715,11 +717,19 @@ async def subscribe_push_token(req: PushTokenRequest, user=Depends(get_current_u
     else:
         await db._db.collection("user_profiles").document(uid).set({"push_tokens": [token]}, merge=True)
     
-    topics = ["breaking_news"]
-    if profile and getattr(profile, 'global_alerts_enabled', False):
-        topics.append("global_alerts")
+    topics_to_subscribe = []
+    topics_to_unsubscribe = []
+    
+    if profile and getattr(profile, 'global_alerts_enabled', True):
+        topics_to_subscribe.extend(["breaking_news", "global_alerts"])
+    else:
+        topics_to_unsubscribe.extend(["breaking_news", "global_alerts"])
         
-    await subscribe_token_to_topics(token, topics)
+    if topics_to_subscribe:
+        await subscribe_token_to_topics(token, topics_to_subscribe)
+    if topics_to_unsubscribe:
+        await unsubscribe_token_from_topics(token, topics_to_unsubscribe)
+        
     return {"status": "ok", "message": "Subscribed to background push notifications"}
 
 
@@ -793,6 +803,9 @@ async def complete_onboarding(
         selected_subcategories=request.selected_subcategories,
         tone_preference=request.tone_preference,
         global_alerts_enabled=request.global_alerts_enabled,
+        category_alerts_enabled=request.category_alerts_enabled,
+        trendy_alerts_enabled=request.trendy_alerts_enabled,
+        summary_alerts_enabled=request.summary_alerts_enabled,
         ai_extras=request.ai_extras,
         ai_extras_keywords=ai_keywords,
         content_filters=request.content_filters,
@@ -835,6 +848,39 @@ async def get_my_profile(user=Depends(get_current_user)):
     profile = await db.get_user_profile(uid)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
+    return profile
+
+@app.post(
+    "/profile/update",
+    response_model=UserProfile,
+    summary="Update specific profile fields (Settings)",
+    tags=["Profile"],
+)
+async def update_my_profile(request: UpdateProfileRequest, user=Depends(get_current_user)):
+    uid = user["uid"]
+    profile = await db.get_user_profile(uid)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found.")
+    
+    if request.tone_preference is not None:
+        profile.tone_preference = request.tone_preference
+    if request.global_alerts_enabled is not None:
+        profile.global_alerts_enabled = request.global_alerts_enabled
+        if getattr(profile, 'push_tokens', None):
+            for token in profile.push_tokens:
+                if profile.global_alerts_enabled:
+                    await subscribe_token_to_topics(token, ["breaking_news", "global_alerts"])
+                else:
+                    await unsubscribe_token_from_topics(token, ["breaking_news", "global_alerts"])
+    
+    if request.category_alerts_enabled is not None:
+        profile.category_alerts_enabled = request.category_alerts_enabled
+    if request.trendy_alerts_enabled is not None:
+        profile.trendy_alerts_enabled = request.trendy_alerts_enabled
+    if request.summary_alerts_enabled is not None:
+        profile.summary_alerts_enabled = request.summary_alerts_enabled
+        
+    await db.save_user_profile(profile)
     return profile
 
 
