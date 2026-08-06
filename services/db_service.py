@@ -17,7 +17,7 @@ from typing import List, Optional
 from google.cloud import firestore
 from google.cloud.firestore_v1.async_client import AsyncClient
 
-from models.schemas import Article, UserProfile, UserFeed
+from models.schemas import Article, UserProfile, UserFeed, UserSummary
 
 logger = logging.getLogger("uckhabar.db")
 
@@ -217,6 +217,35 @@ class DatabaseService:
         logger.info(f"[DB] Deleted {deleted} articles older than {days} days")
         return deleted
 
+    async def delete_old_summaries(self, days: int = 3) -> int:
+        """
+        Delete all user summaries older than `days` ago.
+        Called by the daily cleanup scheduled job.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        docs = (
+            self._db.collection("user_summaries")
+            .where("created_at", "<", cutoff)
+            .stream()
+        )
+        
+        deleted = 0
+        batch = self._db.batch()
+        
+        async for doc in docs:
+            batch.delete(doc.reference)
+            deleted += 1
+            if deleted % 499 == 0:
+                await batch.commit()
+                batch = self._db.batch()
+                
+        if deleted % 499 != 0:
+            await batch.commit()
+            
+        logger.info(f"[DB] Deleted {deleted} user summaries older than {days} days")
+        return deleted
+
     # -----------------------------------------------------------------------
     # User profiles
     # -----------------------------------------------------------------------
@@ -269,6 +298,15 @@ class DatabaseService:
         if doc.exists:
             return UserFeed(**doc.to_dict())
         return None
+
+    async def save_user_summary(self, summary: UserSummary) -> None:
+        """Save a generated summary into the user_summaries collection."""
+        ref = self._db.collection("user_summaries").document(summary.id)
+        # Convert created_at explicitly so it gets stored as a native Firestore Timestamp
+        data = summary.model_dump(mode="json")
+        data["created_at"] = summary.created_at
+        await ref.set(data)
+        logger.debug(f"[DB] Saved summary {summary.id} for user {summary.user_id}")
 
     # -----------------------------------------------------------------------
     # User activity / lifecycle management

@@ -155,7 +155,18 @@ class UserFeed(BaseModel):
     article_count: int = 0
     interval_summary:        Optional[str] = None
     interval_summary_window: Optional[str] = None
+    interval_summary_tone:   Optional[str] = None
 
+class UserSummary(BaseModel):
+    """Stores generated summaries for history and analysis."""
+    id:            str = Field(default_factory=lambda: secrets.token_hex(8))
+    user_id:       str
+    user_name:     Optional[str] = None
+    content:       str
+    tone:          str
+    categories:    List[str] = Field(default_factory=list)
+    window:        str
+    created_at:    datetime = Field(default_factory=datetime.utcnow)
 
 # ---------------------------------------------------------------------------
 # Onboarding session (AI chat state, stored in-memory)

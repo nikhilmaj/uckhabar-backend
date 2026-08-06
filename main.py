@@ -44,6 +44,7 @@ from models.schemas import (
     UserProfile,
     ScoredArticle,
     UpdateProfileRequest,
+    UserSummary,
 )
 from services.auth_service import get_current_user
 from services.db_service import DatabaseService
@@ -326,7 +327,17 @@ async def feed_builder_job() -> None:
                 TRIGGER_HOURS_IST = [8, 12, 17, 21]
                 is_trigger_hour = (ist_hour in TRIGGER_HOURS_IST) and (now.minute < 30)
 
+                tone = getattr(profile, 'tone_preference', 'light') or 'light'
+                existing_feed = await db.get_user_feed(profile.user_id)
+                needs_new_summary = False
+                
                 if is_trigger_hour:
+                    needs_new_summary = True
+                elif existing_feed and getattr(existing_feed, 'interval_summary_window', None) == window_label:
+                    if getattr(existing_feed, 'interval_summary_tone', None) != tone:
+                        needs_new_summary = True
+
+                if needs_new_summary:
                     # Filter top recent articles for the summary (last 12 hours)
                     recent_articles_for_summary = [
                         a for a in user_feed
@@ -334,13 +345,23 @@ async def feed_builder_job() -> None:
                     ][:8]
 
                     if len(recent_articles_for_summary) >= 3:
-                        tone = getattr(profile, 'tone_preference', 'light') or 'light'
+                        window_time = window_label.split(" ")[1] if " " in window_label else window_label
                         interval_summary_text = await summarization_agent.generate_interval_summary(
-                            recent_articles_for_summary, tone
+                            recent_articles_for_summary, tone, window=window_time
                         )
+                        if interval_summary_text:
+                            cats = getattr(profile, 'selected_categories', [])
+                            summary_obj = UserSummary(
+                                user_id=profile.user_id,
+                                user_name=profile.name,
+                                content=interval_summary_text,
+                                tone=tone,
+                                categories=cats,
+                                window=window_label
+                            )
+                            await db.save_user_summary(summary_obj)
                 else:
                     # Not a trigger hour, try to carry over the existing summary if it matches the current window
-                    existing_feed = await db.get_user_feed(profile.user_id)
                     if existing_feed and getattr(existing_feed, 'interval_summary_window', None) == window_label:
                         interval_summary_text = getattr(existing_feed, 'interval_summary', None)
 
@@ -352,6 +373,7 @@ async def feed_builder_job() -> None:
                     article_count=len(user_feed),
                     interval_summary=interval_summary_text,
                     interval_summary_window=window_label,
+                    interval_summary_tone=tone,
                 )
                 await db.save_user_feed(feed)
 
@@ -359,7 +381,10 @@ async def feed_builder_job() -> None:
                     if is_trigger_hour:
                         if getattr(profile, 'summary_alerts_enabled', True):
                             tod = "morning" if 5 <= ist_hour < 12 else ("afternoon" if 12 <= ist_hour < 18 else "evening")
-                            await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
+                            dead_tokens = await send_feed_ready_push(profile.push_tokens, time_of_day=tod)
+                            if dead_tokens:
+                                profile.push_tokens = [t for t in profile.push_tokens if t not in dead_tokens]
+                                await db.save_user_profile(profile)
                     elif getattr(profile, 'trendy_alerts_enabled', True):
                         # Try to send a personalized trendy push (max 1 every 1.5 hours)
                         last_trendy = getattr(profile, 'last_trendy_push', None)
@@ -433,11 +458,32 @@ async def build_feed_for_single_user(target_uid: str) -> None:
         ][:8]
 
         interval_summary_text = None
-        if len(recent_articles_for_summary) >= 3:
-            tone = getattr(profile, 'tone_preference', 'light') or 'light'
+        tone = getattr(profile, 'tone_preference', 'light') or 'light'
+        
+        # Determine if we need to regenerate
+        needs_new_summary = True
+        existing_feed = await db.get_user_feed(profile.user_id)
+        if existing_feed and getattr(existing_feed, 'interval_summary_window', None) == window_label:
+            if getattr(existing_feed, 'interval_summary_tone', None) == tone:
+                needs_new_summary = False
+                interval_summary_text = getattr(existing_feed, 'interval_summary', None)
+                
+        if needs_new_summary and len(recent_articles_for_summary) >= 3:
+            window_time = window_label.split(" ")[1] if " " in window_label else window_label
             interval_summary_text = await summarization_agent.generate_interval_summary(
-                recent_articles_for_summary, tone
+                recent_articles_for_summary, tone, window=window_time
             )
+            if interval_summary_text:
+                cats = getattr(profile, 'selected_categories', [])
+                summary_obj = UserSummary(
+                    user_id=profile.user_id,
+                    user_name=profile.name,
+                    content=interval_summary_text,
+                    tone=tone,
+                    categories=cats,
+                    window=window_label
+                )
+                await db.save_user_summary(summary_obj)
 
         feed = UserFeed(
             user_id=profile.user_id,
@@ -447,21 +493,26 @@ async def build_feed_for_single_user(target_uid: str) -> None:
             article_count=len(user_feed),
             interval_summary=interval_summary_text,
             interval_summary_window=window_label,
+            interval_summary_tone=tone,
         )
         await db.save_user_feed(feed)
         if getattr(profile, 'push_tokens', None) and getattr(profile, 'summary_alerts_enabled', True):
-            await send_feed_ready_push(profile.push_tokens, time_of_day="curated")
+            dead_tokens = await send_feed_ready_push(profile.push_tokens, time_of_day="curated")
+            if dead_tokens:
+                profile.push_tokens = [t for t in profile.push_tokens if t not in dead_tokens]
+                await db.save_user_profile(profile)
         logger.info(f"[FeedBuilder] Immediately rebuilt {len(user_feed)} articles for {target_uid}")
     except Exception as exc:
         logger.error(f"[FeedBuilder] Single user build failed for {target_uid}: {exc}")
 
 
 async def daily_cleanup_job() -> None:
-    """Deletes articles older than 7 days from Firestore to control storage costs."""
+    """Deletes articles older than 7 days and summaries older than 5 days from Firestore."""
     logger.info("[Scheduler] Daily cleanup job started")
     try:
-        deleted = await db.delete_old_articles(days=7)
-        logger.info(f"[Scheduler] Daily cleanup done — {deleted} old articles removed")
+        deleted_art = await db.delete_old_articles(days=7)
+        deleted_sum = await db.delete_old_summaries(days=5)
+        logger.info(f"[Scheduler] Daily cleanup done — {deleted_art} articles, {deleted_sum} summaries removed")
     except Exception as exc:
         logger.error(f"[Scheduler] Cleanup job failed: {exc}")
 

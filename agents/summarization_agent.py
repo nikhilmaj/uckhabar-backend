@@ -17,7 +17,7 @@ class SummarizationAgent:
             location="us-central1",
         )
 
-    async def generate_interval_summary(self, articles: List[ScoredArticle], tone: str) -> Optional[str]:
+    async def generate_interval_summary(self, articles: List[ScoredArticle], tone: str, window: str = "") -> Optional[str]:
         if not articles:
             return None
 
@@ -28,18 +28,15 @@ class SummarizationAgent:
         tone = (tone or "").lower()
         if tone == "professional" or tone == "formal":
             sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences."
-        elif tone == "humorous":
-            sys_instruct = "You are a witty late-night talk show host. Give a clever, punchy summary of the news, including a lighthearted joke or pun if appropriate. Keep it to 3-5 sentences."
-        elif tone == "sarcastic":
-            sys_instruct = "You are a highly sarcastic, dry, and slightly cynical news commentator. Give a factual but biting summary of the news. Keep it to 3-5 sentences."
-        elif tone == "gen z" or tone == "gen_z":
-            sys_instruct = "You are a Gen Z news commentator. Explain the news using modern internet slang (e.g., no cap, fr, based, giving) but keep the facts perfectly accurate. Keep it to 3-5 sentences."
         elif tone == "bullets":
             sys_instruct = "You are a busy executive assistant. Provide a concise, bulleted list of the top highlights. No introductory text, just the bullet points. Maximum 4 bullets."
         else: # "casual" or "light" or default
             sys_instruct = "You are a friendly, conversational companion. Catch the reader up on the news in a casual, easy-going tone. Keep it to 3-5 sentences."
 
-        prompt = f"Here are the top news articles from the recent interval. Please summarize them according to your persona.\n\nARTICLES:\n{payload}"
+        if window:
+            sys_instruct += f"\n\nCRITICAL RULE: You MUST begin your response exactly with 'Good {window}.' (e.g. Good {window}. Here is your briefing...)"
+
+        prompt = f"INSTRUCTIONS: {sys_instruct}\n\nHere are the top news articles from the recent interval. Please summarize them strictly according to the tone requested above.\n\nARTICLES:\n{payload}"
 
         try:
             response = await self._client.aio.models.generate_content(
