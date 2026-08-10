@@ -62,7 +62,6 @@ class UserProfile(BaseModel):
     # V2 UI fields — populated only for schema_version >= 2
     selected_categories:     List[str] = Field(default_factory=list)
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
-    tone_preference:         str = Field(default="Professional")
     global_alerts_enabled:   bool = True
     category_alerts_enabled: bool = True
     trendy_alerts_enabled:   bool = True
@@ -219,7 +218,6 @@ class CompleteOnboardingRequest(BaseModel):
     name:                    Optional[str] = None
     selected_categories:     List[str]
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
-    tone_preference:         str = Field(default="Professional")
     global_alerts_enabled:   bool = True
     category_alerts_enabled: bool = True
     trendy_alerts_enabled:   bool = True
@@ -227,7 +225,6 @@ class CompleteOnboardingRequest(BaseModel):
     ai_extras:               Optional[str] = None   # free-text from Screen 4 AI chat
 
 class UpdateProfileRequest(BaseModel):
-    tone_preference:         Optional[str] = None
     global_alerts_enabled:   Optional[bool] = None
     category_alerts_enabled: Optional[bool] = None
     trendy_alerts_enabled:   Optional[bool] = None

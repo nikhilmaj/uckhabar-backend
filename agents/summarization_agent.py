@@ -17,7 +17,7 @@ class SummarizationAgent:
             location="us-central1",
         )
 
-    async def generate_interval_summary(self, articles: List[ScoredArticle], tone: str, window: str = "") -> Optional[str]:
+    async def generate_interval_summary(self, articles: List[ScoredArticle], window: str = "") -> Optional[str]:
         if not articles:
             return None
 
@@ -25,18 +25,12 @@ class SummarizationAgent:
         for a in articles:
             payload += f"- Title: {a.title}\n  Source: {a.source}\n\n"
 
-        tone = (tone or "").lower()
-        if tone == "professional" or tone == "formal":
-            sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences."
-        elif tone == "bullets":
-            sys_instruct = "You are a busy executive assistant. Provide a concise, bulleted list of the top highlights. No introductory text, just the bullet points. Maximum 4 bullets."
-        else: # "casual" or "light" or default
-            sys_instruct = "You are a friendly, conversational companion. Catch the reader up on the news in a casual, easy-going tone. Keep it to 3-5 sentences."
+        sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences."
 
         if window:
             sys_instruct += f"\n\nCRITICAL RULE: You MUST begin your response exactly with 'Good {window}.' (e.g. Good {window}. Here is your briefing...)"
 
-        prompt = f"INSTRUCTIONS: {sys_instruct}\n\nHere are the top news articles from the recent interval. Please summarize them strictly according to the tone requested above.\n\nARTICLES:\n{payload}"
+        prompt = f"INSTRUCTIONS: {sys_instruct}\n\nHere are the top news articles from the recent interval. Please summarize them strictly according to the instructions above.\n\nARTICLES:\n{payload}"
 
         try:
             response = await self._client.aio.models.generate_content(

@@ -327,15 +327,11 @@ async def feed_builder_job() -> None:
                 TRIGGER_HOURS_IST = [8, 12, 17, 21]
                 is_trigger_hour = (ist_hour in TRIGGER_HOURS_IST) and (now.minute < 30)
 
-                tone = getattr(profile, 'tone_preference', 'light') or 'light'
                 existing_feed = await db.get_user_feed(profile.user_id)
                 needs_new_summary = False
                 
                 if is_trigger_hour:
                     needs_new_summary = True
-                elif existing_feed and getattr(existing_feed, 'interval_summary_window', None) == window_label:
-                    if getattr(existing_feed, 'interval_summary_tone', None) != tone:
-                        needs_new_summary = True
 
                 if needs_new_summary:
                     # Filter top recent articles for the summary (last 12 hours)
@@ -347,7 +343,7 @@ async def feed_builder_job() -> None:
                     if len(recent_articles_for_summary) >= 3:
                         window_time = window_label.split(" ")[1] if " " in window_label else window_label
                         interval_summary_text = await summarization_agent.generate_interval_summary(
-                            recent_articles_for_summary, tone, window=window_time
+                            recent_articles_for_summary, window=window_time
                         )
                         if interval_summary_text:
                             cats = getattr(profile, 'selected_categories', [])
@@ -355,7 +351,7 @@ async def feed_builder_job() -> None:
                                 user_id=profile.user_id,
                                 user_name=profile.name,
                                 content=interval_summary_text,
-                                tone=tone,
+                                tone="professional",
                                 categories=cats,
                                 window=window_label
                             )
@@ -373,7 +369,7 @@ async def feed_builder_job() -> None:
                     article_count=len(user_feed),
                     interval_summary=interval_summary_text,
                     interval_summary_window=window_label,
-                    interval_summary_tone=tone,
+                    interval_summary_tone="professional",
                 )
                 await db.save_user_feed(feed)
 
@@ -913,8 +909,6 @@ async def update_my_profile(request: UpdateProfileRequest, user=Depends(get_curr
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found.")
     
-    if request.tone_preference is not None:
-        profile.tone_preference = request.tone_preference
     if request.global_alerts_enabled is not None:
         profile.global_alerts_enabled = request.global_alerts_enabled
         if getattr(profile, 'push_tokens', None):
