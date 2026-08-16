@@ -897,6 +897,34 @@ async def get_my_profile(user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
     return profile
 
+from firebase_admin import auth
+
+@app.delete(
+    "/profile/me",
+    summary="Delete my profile and account",
+    tags=["Profile"],
+)
+async def delete_my_profile(user=Depends(get_current_user)):
+    """
+    Deletes the authenticated user's profile, feed, and Firebase Auth account.
+    """
+    uid = user["uid"]
+    
+    # 1. Delete user profile
+    await db.delete_user_profile(uid)
+    
+    # 2. Delete user feed
+    await db.delete_user_feed(uid)
+    
+    # 3. Delete Firebase Auth account
+    try:
+        auth.delete_user(uid)
+        logger.info(f"[Auth] Deleted Firebase Auth account for user {uid}")
+    except Exception as e:
+        logger.warning(f"[Auth] Failed to delete Firebase Auth account for user {uid}: {e}")
+        
+    return {"status": "success", "message": "User account completely deleted."}
+
 @app.post(
     "/profile/update",
     response_model=UserProfile,

@@ -265,6 +265,12 @@ class DatabaseService:
             return UserProfile(**doc.to_dict())
         return None
 
+    async def delete_user_profile(self, user_id: str) -> None:
+        """Delete a user's profile from Firestore."""
+        ref = self._db.collection("user_profiles").document(user_id)
+        await ref.delete()
+        logger.info(f"[DB] Profile deleted for user {user_id}")
+
     async def get_all_user_profiles(self) -> List[UserProfile]:
         """
         Fetch all user profiles.
@@ -298,6 +304,12 @@ class DatabaseService:
         if doc.exists:
             return UserFeed(**doc.to_dict())
         return None
+
+    async def delete_user_feed(self, user_id: str) -> None:
+        """Delete a user's pre-built feed from Firestore."""
+        ref = self._db.collection("user_feeds").document(user_id)
+        await ref.delete()
+        logger.info(f"[DB] Feed deleted for user {user_id}")
 
     async def save_user_summary(self, summary: UserSummary) -> None:
         """Save a generated summary into the user_summaries collection."""
