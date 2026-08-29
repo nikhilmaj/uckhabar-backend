@@ -219,11 +219,19 @@ class CompleteOnboardingRequest(BaseModel):
     name:                    Optional[str] = None
     selected_categories:     List[str]
     selected_subcategories:  Dict[str, List[str]] = Field(default_factory=dict)
+    tone_preference:         Optional[str] = None
     global_alerts_enabled:   bool = True
     category_alerts_enabled: bool = True
     trendy_alerts_enabled:   bool = True
     summary_alerts_enabled:  bool = True
     ai_extras:               Optional[str] = None   # free-text from Screen 4 AI chat
+    content_filters:         Dict[str, bool] = Field(default_factory=lambda: {
+        "is_hard_news": True,
+        "is_editorial": True,
+        "is_sponsored": True,
+        "is_explicit":  True,
+        "is_aggregated": True,
+    })
 
 class UpdateProfileRequest(BaseModel):
     global_alerts_enabled:   Optional[bool] = None
