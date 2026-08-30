@@ -25,10 +25,7 @@ class SummarizationAgent:
         for a in articles:
             payload += f"- Title: {a.title}\n  Source: {a.source}\n\n"
 
-        sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences."
-
-        if window:
-            sys_instruct += f"\n\nCRITICAL RULE: You MUST begin your response exactly with 'Good {window}.' (e.g. Good {window}. Here is your briefing...)"
+        sys_instruct = "You are a professional news anchor. Summarize the major developments in a clean, objective, journalistic style. Keep it to 3-5 sentences. Do NOT begin with any greeting like 'Good Morning', 'Good Evening', or similar — jump straight into the news."
 
         prompt = f"INSTRUCTIONS: {sys_instruct}\n\nHere are the top news articles from the recent interval. Please summarize them strictly according to the instructions above.\n\nARTICLES:\n{payload}"
 
